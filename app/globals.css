@@ -74,3 +74,15 @@ textarea {
 .new-job-row {
   animation: new-row-pulse 5s ease-out;
 }
+
+
+.applied-job-row,
+.ag-theme-quartz .ag-row.applied-job-row,
+.ag-theme-quartz-dark .ag-row.applied-job-row {
+  background-color: color-mix(in srgb, hsl(var(--success)) 12%, hsl(var(--panel)));
+}
+
+.ag-theme-quartz .ag-row.applied-job-row:hover,
+.ag-theme-quartz-dark .ag-row.applied-job-row:hover {
+  background-color: color-mix(in srgb, hsl(var(--success)) 18%, hsl(var(--panel)));
+}

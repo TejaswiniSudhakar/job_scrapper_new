@@ -4,7 +4,9 @@
   "private": true,
   "description": "Premium real-time dashboard for multi-source job scraper pipelines.",
   "scripts": {
-    "dev": "next dev",
+    "dev": "node scripts/dev-all.mjs",
+    "dev:frontend": "next dev",
+    "dev:scraper": "C:/Users/Nishant Chandraker/Downloads/private-job-scraper-main/.venv/Scripts/python.exe main.py",
     "build": "next build",
     "start": "next start",
     "lint": "next lint",

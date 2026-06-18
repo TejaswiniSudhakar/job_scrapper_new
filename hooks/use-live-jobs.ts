@@ -14,11 +14,6 @@ export function useLiveJobs() {
     return realtimeClient.subscribe((event) => {
       if (event.type === "job.created") {
         addJob(event.payload);
-        pushToast({
-          tone: "success",
-          title: "New job scraped",
-          description: `${event.payload.jobTitle} at ${event.payload.company}`
-        });
       }
 
       if (event.type === "scraper.failed") {

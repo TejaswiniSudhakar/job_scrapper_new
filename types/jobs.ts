@@ -67,6 +67,23 @@ export type DashboardAnalytics = {
   jobsScrapedToday: number;
   successRate: number;
   scrapers: ScraperMetric[];
+  daily: DailyJobMetric[];
+  statusBreakdown: StatusMetric[];
+};
+
+export type DailyJobMetric = {
+  date: string;
+  scraped: number;
+  applied: number;
+  saved: number;
+  interviews: number;
+  rejected: number;
+  averageScore: number;
+};
+
+export type StatusMetric = {
+  status: JobStatus;
+  count: number;
 };
 
 export type JobFilters = {
@@ -77,6 +94,7 @@ export type JobFilters = {
   companies: string[];
   locations: string[];
   minScore: number;
+  sortBy: "freshest" | "oldest" | "bestScore";
   minSalary?: number;
   maxSalary?: number;
   postedWithinDays?: 1 | 3 | 7 | 30;

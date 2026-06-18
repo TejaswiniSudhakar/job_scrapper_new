@@ -4,7 +4,7 @@ import "ag-grid-community/styles/ag-grid.css";
 import "ag-grid-community/styles/ag-theme-quartz.css";
 
 import { useMemo, useRef } from "react";
-import { AllCommunityModule, ModuleRegistry, type ColDef, type GridApi, type GridReadyEvent, type RowClickedEvent } from "ag-grid-community";
+import { AllCommunityModule, ModuleRegistry, type ColDef, type GridApi, type GridReadyEvent, type RowClickedEvent, type PostSortRowsParams } from "ag-grid-community";
 import { AgGridReact } from "ag-grid-react";
 import { ExternalLink } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -38,18 +38,35 @@ export function JobGrid({ jobs }: { jobs: Job[] }) {
           </button>
         )
       },
-      { headerName: "Company", field: "company", minWidth: 180 },
-      { headerName: "Location", field: "location", minWidth: 180 },
-      { headerName: "Salary", field: "salary", minWidth: 130 },
-      { headerName: "Experience", field: "experienceRequired", minWidth: 140 },
-      { headerName: "Employment Type", field: "employmentType", minWidth: 150 },
-      { headerName: "Source", field: "source", minWidth: 120, filter: true },
+      { headerName: "Company", field: "company", minWidth: 160 },
       {
-        headerName: "Posted",
+        headerName: "GPT Score",
+        field: "gptRelevanceScore",
+        minWidth: 105,
+        cellRenderer: ({ value }: { value: number }) => (
+          <span className={value >= 8 ? "font-semibold text-teal-600" : "font-medium"}>{value.toFixed(1)}/10</span>
+        )
+      },
+      {
+        headerName: "Posted ago",
         field: "postedTime",
         minWidth: 110,
         valueFormatter: ({ value }) => formatRelativeTime(value)
       },
+      {
+        headerName: "Experience",
+        field: "experienceRequired",
+        minWidth: 115,
+        comparator: compareExperience
+      },
+      {
+        headerName: "Salary",
+        field: "salary",
+        minWidth: 120,
+        valueFormatter: ({ value }) => value || "Not mentioned"
+      },
+      { headerName: "Employment Type", field: "employmentType", minWidth: 125 },
+      { headerName: "Source", field: "source", minWidth: 105, filter: true },
       {
         headerName: "Scraped",
         field: "scrapedTime",
@@ -57,14 +74,7 @@ export function JobGrid({ jobs }: { jobs: Job[] }) {
         sort: "desc",
         valueFormatter: ({ value }) => formatRelativeTime(value)
       },
-      {
-        headerName: "GPT Score",
-        field: "gptRelevanceScore",
-        minWidth: 120,
-        cellRenderer: ({ value }: { value: number }) => (
-          <span className={value >= 88 ? "font-semibold text-teal-600" : "font-medium"}>{value}</span>
-        )
-      },
+      { headerName: "Location", field: "location", minWidth: 180 },
       {
         headerName: "Match %",
         field: "matchPercentage",
@@ -81,10 +91,11 @@ export function JobGrid({ jobs }: { jobs: Job[] }) {
             variant="primary"
             onClick={(event) => {
               event.stopPropagation();
+              updateStatus(data.id, "APPLIED");
               window.open(data.applyLink, "_blank", "noopener,noreferrer");
               pushToast({
                 tone: "info",
-                title: "Apply link opened",
+                title: "Marked as applied",
                 description: `${data.jobTitle} at ${data.company}`
               });
             }}
@@ -131,6 +142,19 @@ export function JobGrid({ jobs }: { jobs: Job[] }) {
     if (event.data) selectJob(event.data);
   }
 
+  function keepAppliedJobsAtBottom(params: PostSortRowsParams<Job>) {
+    const activeRows = params.nodes.filter((node) => node.data?.status !== "APPLIED");
+    const appliedRows = params.nodes.filter((node) => node.data?.status === "APPLIED");
+    params.nodes.length = 0;
+    params.nodes.push(...activeRows, ...appliedRows);
+  }
+
+  function getRowClasses(data?: Job) {
+    return [data?.status === "APPLIED" ? "applied-job-row" : "", data?.isNew ? "new-job-row" : ""]
+      .filter(Boolean)
+      .join(" ");
+  }
+
   return (
     <div className={darkMode ? "ag-theme-quartz-dark h-[620px]" : "ag-theme-quartz h-[620px]"}>
       <AgGridReact<Job>
@@ -145,14 +169,35 @@ export function JobGrid({ jobs }: { jobs: Job[] }) {
         }}
         rowSelection="multiple"
         animateRows
+        suppressScrollOnNewData
+        getRowId={({ data }) => data.id}
+        postSortRows={keepAppliedJobsAtBottom}
         pagination
         paginationPageSize={50}
         rowBuffer={20}
         suppressCellFocus
         onGridReady={onGridReady}
         onRowClicked={onRowClicked}
-        getRowClass={({ data }) => (data?.isNew ? "new-job-row" : "")}
+        getRowClass={({ data }) => getRowClasses(data)}
       />
     </div>
   );
+}
+
+function compareExperience(valueA?: string, valueB?: string) {
+  const expA = parseExperienceRange(valueA);
+  const expB = parseExperienceRange(valueB);
+
+  if (expA.min !== expB.min) return expA.min - expB.min;
+  if (expA.max !== expB.max) return expA.max - expB.max;
+  return expA.label.localeCompare(expB.label);
+}
+
+function parseExperienceRange(value?: string) {
+  const label = value || "";
+  const numbers = label.match(/\d+(?:\.\d+)?/g)?.map(Number) ?? [];
+  const min = numbers[0] ?? Number.MAX_SAFE_INTEGER;
+  const max = numbers[1] ?? min;
+
+  return { label, min, max };
 }

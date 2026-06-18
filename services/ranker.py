@@ -1,5 +1,6 @@
 import re
 import json
+from urllib import response
 import numpy as np
 import os
 from config import APP_CONFIG
@@ -232,9 +233,8 @@ Return JSON:
 """
 
         response = client.chat.completions.create(
-            model="gpt-4o-mini",
-            temperature=0.2,
-            max_tokens=80,
+            model="gpt-5-mini",
+            max_completion_tokens=1000,
             response_format={"type": "json_object"},
             messages=[
                 {"role": "system", "content": "You are a practical evaluator."},
@@ -246,9 +246,12 @@ Return JSON:
         gpt_score = int(result.get("final_score", 0))
         reason = result.get("reason", "")
 
-    except:
+    except Exception as e:
+        print("GPT Error:", str(e))
         gpt_score = 0
-        reason = "GPT evaluation failed"
+        reason = f"GPT evaluation failed: {e}"
+        print(response.choices[0].message)
+        print(repr(response.choices[0].message.content))
 
     # ==============================
     # FINAL SCORE (BALANCED)

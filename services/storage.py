@@ -29,7 +29,9 @@ def init_db():
             source TEXT,
             company TEXT,
             title TEXT,
-            experience_required INTEGER,
+            experience_required TEXT,
+            salary TEXT,
+            location TEXT,
             job_description TEXT,
             final_score REAL,
             pre_score REAL,
@@ -41,6 +43,19 @@ def init_db():
         """)
 
         conn.commit()
+
+
+        ensure_column(cursor, "salary", "TEXT")
+        ensure_column(cursor, "location", "TEXT")
+
+        conn.commit()
+
+
+def ensure_column(cursor, column_name, column_type):
+    cursor.execute("PRAGMA table_info(jobs)")
+    existing_columns = {row[1] for row in cursor.fetchall()}
+    if column_name not in existing_columns:
+        cursor.execute(f"ALTER TABLE jobs ADD COLUMN {column_name} {column_type}")
 
 
 # ==============================
@@ -92,6 +107,8 @@ def save_job(job, score):
                     company,
                     title,
                     experience_required,
+                    salary,
+                    location,
                     job_description,
                     final_score,
                     pre_score,
@@ -99,15 +116,17 @@ def save_job(job, score):
                     reason,
                     cover_letter,
                     created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     url_hash,
                     url,
                     job.get("source"),
                     job.get("company_name"),
                     job.get("job_title"),
-                    job.get("experience_required", -1),
-                    job.get("job_description", "")[:2000],  # Truncate to fit in DB
+                    job.get("experience_required", "Not mentioned"),
+                    job.get("salary", "Not mentioned"),
+                    job.get("location", ""),
+                    job.get("job_description", "")[:4000],  # Truncate to fit in DB
                     job.get("final_score"),
                     job.get("pre_score"),
                     job.get("gpt_score"),

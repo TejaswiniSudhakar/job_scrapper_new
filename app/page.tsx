@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
 import { KpiStrip } from "@/components/dashboard/kpi-strip";
+import { buildJobActivityAnalytics, JobActivityAnalytics } from "@/components/dashboard/job-activity-analytics";
 import { ScraperAnalytics } from "@/components/dashboard/scraper-analytics";
 import { AppShell } from "@/components/layout/app-shell";
 import { Toaster } from "@/components/layout/toaster";
@@ -34,6 +35,8 @@ export default function Page() {
 function DashboardPage() {
   useLiveJobs();
   const [mounted, setMounted] = useState(false);
+  const hasLoadedJobs = useRef(false);
+  const knownJobIds = useRef(new Set<string>());
   const jobs = useDashboardStore((state) => state.jobs);
   const setJobs = useDashboardStore((state) => state.setJobs);
   const filters = useDashboardStore((state) => state.filters);
@@ -41,13 +44,17 @@ function DashboardPage() {
   const pushToast = useDashboardStore((state) => state.pushToast);
 
   const jobsQuery = useQuery({
-    queryKey: ["jobs", filters],
-    queryFn: () => fetchJobs(filters)
+    queryKey: ["jobs"],
+    queryFn: () => fetchJobs(),
+    refetchInterval: 5_000,
+    refetchIntervalInBackground: true
   });
 
   const analyticsQuery = useQuery({
     queryKey: ["analytics"],
-    queryFn: fetchAnalytics
+    queryFn: fetchAnalytics,
+    refetchInterval: 60_000,
+    refetchIntervalInBackground: true
   });
 
   const searchesQuery = useQuery({
@@ -58,7 +65,25 @@ function DashboardPage() {
   useEffect(() => setMounted(true), []);
 
   useEffect(() => {
-    if (jobsQuery.data) setJobs(jobsQuery.data);
+    if (!jobsQuery.data) return;
+
+    if (!hasLoadedJobs.current) {
+      knownJobIds.current = new Set(jobsQuery.data.map((job) => job.id));
+      hasLoadedJobs.current = true;
+      setJobs(jobsQuery.data);
+      return;
+    }
+
+    const newJobs = jobsQuery.data.filter((job) => !knownJobIds.current.has(job.id));
+    const newJobIds = new Set(newJobs.map((job) => job.id));
+    knownJobIds.current = new Set(jobsQuery.data.map((job) => job.id));
+
+    setJobs(
+      jobsQuery.data.map((job) => ({
+        ...job,
+        isNew: newJobIds.has(job.id) || job.isNew
+      }))
+    );
   }, [jobsQuery.data, setJobs]);
 
   useEffect(() => {
@@ -66,6 +91,10 @@ function DashboardPage() {
   }, [searchesQuery.data, setSavedSearches]);
 
   const filteredJobs = useMemo(() => applyClientFilters(jobs, filters), [jobs, filters]);
+  const liveAnalytics = useMemo(
+    () => (analyticsQuery.data ? buildJobActivityAnalytics(jobs, analyticsQuery.data) : undefined),
+    [analyticsQuery.data, jobs]
+  );
 
   function exportCsv() {
     const headers = [
@@ -121,9 +150,10 @@ function DashboardPage() {
 
   return (
     <AppShell>
-      {analyticsQuery.data ? <KpiStrip analytics={analyticsQuery.data} /> : null}
-      {analyticsQuery.data ? <ScraperAnalytics analytics={analyticsQuery.data} /> : null}
-      <FiltersBar onExport={exportCsv} />
+      {liveAnalytics ? <KpiStrip analytics={liveAnalytics} /> : null}
+      {liveAnalytics ? <ScraperAnalytics analytics={liveAnalytics} /> : null}
+      {liveAnalytics ? <JobActivityAnalytics analytics={liveAnalytics} /> : null}
+      <FiltersBar onExport={exportCsv} onRefresh={() => { void jobsQuery.refetch(); void analyticsQuery.refetch(); }} isRefreshing={jobsQuery.isFetching || analyticsQuery.isFetching} />
       <section className="overflow-hidden rounded-md border border-border bg-panel">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3">
           <div>
@@ -143,7 +173,7 @@ function DashboardPage() {
 }
 
 function applyClientFilters(jobs: Job[], filters: ReturnType<typeof useDashboardStore.getState>["filters"]) {
-  return jobs.filter((job) => {
+  const filtered = jobs.filter((job) => {
     if (filters.minScore && job.gptRelevanceScore < filters.minScore) return false;
     if (filters.sources.length && !filters.sources.includes(job.source)) return false;
     if (filters.workModes.length && !filters.workModes.includes(job.workMode)) return false;
@@ -154,4 +184,17 @@ function applyClientFilters(jobs: Job[], filters: ReturnType<typeof useDashboard
     }
     return true;
   });
+
+  return [...filtered].sort((a, b) => {
+    const statusOrder = getStatusSortOrder(a.status) - getStatusSortOrder(b.status);
+    if (statusOrder !== 0) return statusOrder;
+
+    if (filters.sortBy === "oldest") return Date.parse(a.scrapedTime) - Date.parse(b.scrapedTime);
+    if (filters.sortBy === "bestScore") return b.gptRelevanceScore - a.gptRelevanceScore;
+    return Date.parse(b.scrapedTime) - Date.parse(a.scrapedTime);
+  });
+}
+
+function getStatusSortOrder(status: Job["status"]) {
+  return status === "APPLIED" ? 1 : 0;
 }

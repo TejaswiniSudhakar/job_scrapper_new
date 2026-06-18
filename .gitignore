@@ -1,27 +1,42 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
+env/
+
+# Databases
+*.db
+*.sqlite
+*.sqlite3
+
+# Generated CSVs
+*.csv
+
+# Logs
+*.log
+log.txt
+
+# Environment variables
+.env
+.env.local
+.env.development.local
+.env.production.local
+
+# VS Code
+.vscode/
+
+# Node / Next.js
 node_modules/
 .next/
 out/
+
+# Build artifacts
 dist/
 build/
 
-.env
-.env.*
-!.env.example
-!.env.local.example
-
+# OS files
 .DS_Store
-__pycache__/
-*.pyc
-venv/
-.venv/
-
-jobs.db
-jobs.db_backup_*.db
-data/seen_jobs.db
-data/seen_jobs.db_backup_*.db
-jobs.csv
-log.txt
-log.txt.*
-*.log
-app.lock
-tsconfig.tsbuildinfo
+Thumbs.db

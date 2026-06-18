@@ -84,16 +84,45 @@ cd "C:\Users\Nishant Chandraker\Documents\Codex\2026-06-04\help-me-di-all-the-li
 npm install
 ```
 
-Start the Next.js development server:
+Start the scraper and frontend together:
 
 ```powershell
 npm run dev
 ```
 
+This command runs:
+
+- Python scraper backend from `main.py`
+- Next.js dashboard at `http://localhost:3000`
+
 Open:
 
 ```text
 http://localhost:3000
+```
+
+Stop both processes from the same terminal:
+
+```text
+Ctrl+C
+```
+
+If the scraper does not stop on Windows, use:
+
+```text
+Ctrl+Break
+```
+
+Run only the frontend:
+
+```powershell
+npm run dev:frontend
+```
+
+Run only the scraper:
+
+```powershell
+npm run dev:scraper
 ```
 
 ## Verify Real Backend Data

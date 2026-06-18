@@ -57,7 +57,7 @@ APP_CONFIG = {
         },
     },
     "ranking": {
-        "threshold": 5,
+        "threshold": 8,
         "expected_min_salary": 1_000_000,
         "expected_max_salary": 3_000_000,
     },

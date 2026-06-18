@@ -263,6 +263,20 @@ export const mockAnalytics: DashboardAnalytics = {
       status: "Running",
       averageScore: 79
     }
+  ],
+  daily: [
+    { date: "2026-06-06", scraped: 118, applied: 4, saved: 9, interviews: 1, rejected: 2, averageScore: 7.1 },
+    { date: "2026-06-07", scraped: 142, applied: 6, saved: 12, interviews: 2, rejected: 4, averageScore: 7.4 },
+    { date: "2026-06-08", scraped: 126, applied: 5, saved: 10, interviews: 1, rejected: 3, averageScore: 7.2 }
+  ],
+  statusBreakdown: [
+    { status: "UNAPPLIED", count: 301 },
+    { status: "APPLIED", count: 15 },
+    { status: "INTERVIEW", count: 4 },
+    { status: "REJECTED", count: 9 },
+    { status: "OFFER", count: 1 },
+    { status: "EXPIRED", count: 156 },
+    { status: "SAVED", count: 21 }
   ]
 };
 
@@ -270,19 +284,19 @@ export const savedSearches: SavedSearch[] = [
   {
     id: "remote-python",
     name: "Remote Python Jobs",
-    filters: { query: "python", workModes: ["Remote"], minScore: 70 },
+    filters: { query: "python", workModes: ["Remote"], minScore: 7 },
     color: "cyan"
   },
   {
     id: "senior-java",
     name: "Senior Java Jobs",
-    filters: { query: "java", minScore: 80 },
+    filters: { query: "java", minScore: 8 },
     color: "emerald"
   },
   {
     id: "high-salary",
     name: "High Salary Roles",
-    filters: { minSalary: 2000000, minScore: 85 },
+    filters: { minSalary: 2000000, minScore: 8.5 },
     color: "violet"
   }
 ];

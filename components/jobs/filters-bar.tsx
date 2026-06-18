@@ -1,6 +1,6 @@
 "use client";
 
-import { Download, Filter, RotateCcw } from "lucide-react";
+import { Download, Filter, RefreshCw, RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useDashboardStore } from "@/store/dashboard-store";
@@ -15,7 +15,7 @@ const ranges = [
   { label: "30 Days", value: 30 }
 ] as const;
 
-export function FiltersBar({ onExport }: { onExport: () => void }) {
+export function FiltersBar({ onExport, onRefresh, isRefreshing }: { onExport: () => void; onRefresh: () => void; isRefreshing: boolean }) {
   const filters = useDashboardStore((state) => state.filters);
   const updateFilters = useDashboardStore((state) => state.updateFilters);
 
@@ -68,18 +68,32 @@ export function FiltersBar({ onExport }: { onExport: () => void }) {
             </option>
           ))}
         </select>
+        <select
+          className="h-8 rounded-md border border-border bg-background px-2 text-xs"
+          value={filters.sortBy}
+          onChange={(event) => updateFilters({ sortBy: event.target.value as typeof filters.sortBy })}
+        >
+          <option value="freshest">Freshest jobs first</option>
+          <option value="oldest">Oldest jobs first</option>
+          <option value="bestScore">Best GPT score first</option>
+        </select>
         <label className="flex items-center gap-2 text-xs text-muted">
           GPT Score
           <input
             type="range"
             min="0"
-            max="100"
+            max="10"
+            step="0.1"
             value={filters.minScore}
             onChange={(event) => updateFilters({ minScore: Number(event.target.value) })}
           />
-          <span className="w-8 text-foreground">{filters.minScore}</span>
+          <span className="w-12 text-foreground">{filters.minScore}/10</span>
         </label>
         <div className="ml-auto flex gap-2">
+          <Button size="sm" variant="primary" onClick={onRefresh} disabled={isRefreshing}>
+            <RefreshCw className={isRefreshing ? "h-4 w-4 animate-spin" : "h-4 w-4"} />
+            {isRefreshing ? "Syncing" : "Sync"}
+          </Button>
           <Button size="sm" onClick={onExport}>
             <Download className="h-4 w-4" />
             CSV
@@ -95,7 +109,8 @@ export function FiltersBar({ onExport }: { onExport: () => void }) {
                 workModes: [],
                 companies: [],
                 locations: [],
-                minScore: 0,
+                minScore: 5,
+                sortBy: "freshest",
                 postedWithinDays: undefined
               })
             }
