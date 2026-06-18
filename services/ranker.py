@@ -1,88 +1,113 @@
 import re
 import json
-from urllib import response
 import numpy as np
-import os
+import joblib
+from sentence_transformers import SentenceTransformer
 from config import APP_CONFIG
-from dotenv import load_dotenv
-from openai import OpenAI
 
 # ==============================
-# LOAD ENV
-# ==============================
-load_dotenv()
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-
-# ==============================
-# CONFIGURATION
+# CONFIG
 # ==============================
 CANDIDATE_CONFIG = APP_CONFIG["candidate"]
 RANKING_CONFIG = APP_CONFIG["ranking"]
 
 EXPECTED_MIN_SALARY = RANKING_CONFIG["expected_min_salary"]
 EXPECTED_MAX_SALARY = RANKING_CONFIG["expected_max_salary"]
+
 CANDIDATE_EXPERIENCE_YEARS = CANDIDATE_CONFIG["experience_years"]
 KEY_SKILLS = CANDIDATE_CONFIG["key_skills"]
 SKILL_WEIGHTS = CANDIDATE_CONFIG["skill_weights"]
 RESUME_SUMMARY = CANDIDATE_CONFIG["resume_summary"]
 
+# ==============================
+# LOCAL EMBEDDING MODEL
+# ==============================
+embedding_model = None
 resume_embedding = None
-
+ranking_model = None
 
 # ==============================
-# INIT (call once at startup)
+# INIT
 # ==============================
 def init():
+    global embedding_model
     global resume_embedding
-    response = client.embeddings.create(
-        model="text-embedding-3-small",
-        input=RESUME_SUMMARY
-    )
-    resume_embedding = response.data[0].embedding
+    global ranking_model
 
+    print("Loading embedding model...")
+
+    embedding_model = SentenceTransformer(
+        "sentence-transformers/all-MiniLM-L6-v2"
+    )
+
+    resume_embedding = embedding_model.encode(
+        RESUME_SUMMARY,
+        normalize_embeddings=True
+    )
+
+    try:
+        ranking_model = joblib.load("job_rank_model.pkl")
+        print("Loaded trained ranking model")
+    except:
+        ranking_model = None
+        print("No trained model found")
 
 # ==============================
-# EMBEDDING FUNCTIONS
+# EMBEDDINGS
 # ==============================
 def get_embedding(text):
-    response = client.embeddings.create(
-        model="text-embedding-3-small",
-        input=text[:8000]
+    return embedding_model.encode(
+        text[:5000],
+        normalize_embeddings=True
     )
-    return response.data[0].embedding
-
 
 def cosine_similarity(a, b):
-    return np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b))
-
+    return float(np.dot(a, b))
 
 # ==============================
-# SALARY PARSER (IMPROVED)
+# SALARY PARSER
 # ==============================
 def extract_salary(text):
     text = str(text).lower()
-    text = text.replace(",", "").replace("₹", "").replace("rs.", "").replace("rs", "")
 
-    match = re.search(r"(\d+)\s*[-to]+\s*(\d+)\s*(lpa|lakhs?)", text)
+    text = (
+        text.replace(",", "")
+        .replace("₹", "")
+        .replace("rs.", "")
+        .replace("rs", "")
+    )
+
+    match = re.search(
+        r"(\d+)\s*[-to]+\s*(\d+)\s*(lpa|lakhs?)",
+        text
+    )
+
     if match:
-        return ((int(match.group(1)) + int(match.group(2))) / 2) * 100000
+        return (
+            (int(match.group(1)) +
+             int(match.group(2))) / 2
+        ) * 100000
 
-    match = re.search(r"(\d+)\s*(lpa|lakhs?)", text)
+    match = re.search(
+        r"(\d+)\s*(lpa|lakhs?)",
+        text
+    )
+
     if match:
         return int(match.group(1)) * 100000
 
-    match = re.search(r"(\d{5,})\s*[-to]+\s*(\d{5,})", text)
-    if match:
-        return (int(match.group(1)) + int(match.group(2))) / 2
-
     nums = re.findall(r"\d{6,}", text)
+
     if nums:
-        return max(int(n) for n in nums)
+        return max(int(x) for x in nums)
 
     return None
 
-
+# ==============================
+# SALARY SCORE
+# ==============================
 def salary_score(text):
+
     salary = extract_salary(text)
 
     if salary is None:
@@ -90,174 +115,197 @@ def salary_score(text):
 
     if salary >= EXPECTED_MAX_SALARY:
         return 10
-    elif salary >= EXPECTED_MIN_SALARY:
+
+    if salary >= EXPECTED_MIN_SALARY:
         return 8
-    elif salary >= EXPECTED_MIN_SALARY * 0.7:
+
+    if salary >= EXPECTED_MIN_SALARY * 0.7:
         return 6
+
     return 3
 
-
 # ==============================
-# EXPERIENCE SCORING (RELAXED)
+# EXPERIENCE SCORE
 # ==============================
 def experience_fit_score(exp_text):
-    numbers = re.findall(r"\d+", str(exp_text))
+
+    numbers = re.findall(
+        r"\d+",
+        str(exp_text)
+    )
+
     if not numbers:
         return 5
 
-    gap = int(numbers[0]) - CANDIDATE_EXPERIENCE_YEARS
+    required_exp = int(numbers[0])
+
+    gap = required_exp - CANDIDATE_EXPERIENCE_YEARS
 
     if gap >= 3:
         return 1
-    elif gap >= 2:
+
+    if gap >= 2:
         return 3
-    elif gap >= 1:
-        return 7
-    elif gap <= 0:
-        return 10
-    else:
+
+    if gap >= 1:
         return 7
 
+    return 10
 
 # ==============================
-# SKILL MATCH
+# SKILL SCORE
 # ==============================
 def skill_match_score(text):
+
     text = str(text).lower()
 
     score = 0
-    matched_skills = set()
 
     for skill in KEY_SKILLS:
-        # Build regex for exact match (handles spaces too)
-        pattern = r'\b' + re.escape(skill) + r'\b'
 
-        matches = re.findall(pattern, text)
+        pattern = r"\b" + re.escape(skill) + r"\b"
+
+        matches = re.findall(
+            pattern,
+            text
+        )
 
         if matches:
-            matched_skills.add(skill)
 
-            # weight × frequency (capped per skill)
-            weight = SKILL_WEIGHTS.get(skill, 1)
-            freq = min(len(matches), 3)  # avoid over-counting
+            weight = SKILL_WEIGHTS.get(
+                skill,
+                1
+            )
+
+            freq = min(
+                len(matches),
+                3
+            )
 
             score += weight * freq
 
-    # Normalize to 0–10
-    max_possible = sum(SKILL_WEIGHTS.get(s, 1) * 3 for s in KEY_SKILLS)
-    normalized = (score / max_possible) * 10 if max_possible else 0
+    max_possible = sum(
+        SKILL_WEIGHTS.get(skill, 1) * 3
+        for skill in KEY_SKILLS
+    )
 
-    return round(min(normalized, 10), 2)
+    normalized = (
+        score / max_possible
+    ) * 10
 
+    return round(
+        min(normalized, 10),
+        2
+    )
 
 # ==============================
-# MAIN RANK FUNCTION
+# FEATURE EXTRACTION
+# ==============================
+def extract_features(job):
+
+    job_text = str(
+        job.get(
+            "job_description",
+            ""
+        )
+    )[:5000]
+
+    job_embedding = get_embedding(
+        job_text
+    )
+
+    similarity = cosine_similarity(
+        resume_embedding,
+        job_embedding
+    )
+
+    emb_score = similarity * 10
+
+    salary_text = " ".join([
+        str(job.get("salary", "")),
+        str(job.get("job_title", "")),
+        str(job.get("job_description", ""))
+    ])
+
+    salary = extract_salary(
+        salary_text
+    )
+
+    salary = salary or 0
+
+    salary_log = np.log1p(
+        salary
+    )
+
+    exp_score = experience_fit_score(
+        job.get(
+            "experience_required",
+            ""
+        )
+    )
+
+    skill_score = skill_match_score(
+        job_text
+    )
+
+    return [
+        emb_score,
+        skill_score,
+        exp_score,
+        salary_log
+    ]
+
+# ==============================
+# RANK JOB
 # ==============================
 def rank_job(job):
 
-    global resume_embedding
+    features = extract_features(job)
 
-    job_text = str(job.get("job_description", ""))[:6000]
+    emb_score = features[0]
+    skill_score = features[1]
+    exp_score = features[2]
 
-    # ==============================
-    # EMBEDDING SCORE
-    # ==============================
-    try:
-        job_embedding = get_embedding(job_text)
-        similarity = cosine_similarity(resume_embedding, job_embedding)
-        emb_score = ((similarity + 1) / 2) * 10
-    except:
-        emb_score = 0
-
-    # ==============================
-    # OTHER SCORES
-    # ==============================
-    salary_text = " ".join([
-        str(job.get("salary", "")),
-        str(job.get("job_description", "")),
-        str(job.get("job_title", ""))
-    ])
-
-    sal_score = salary_score(salary_text)
-    exp_score = experience_fit_score(job.get("experience_required", ""))
-    skill_score = skill_match_score(job_text)
-
-    # ==============================
-    # PRE-SCORE (TUNED)
-    # ==============================
+    # fallback score
     pre_score = (
         emb_score * 0.50 +
         skill_score * 0.20 +
-        sal_score * 0 +
         exp_score * 0.30
     )
 
-    # small boost for strong skill match
-    if skill_score >= 8:
-        pre_score += 0.5
+    if ranking_model:
 
-    pre_score = min(pre_score, 10)
+        try:
 
-    # ==============================
-    # GPT EVALUATION (RELAXED)
-    # ==============================
-    try:
-        prompt = f"""
-You are a practical hiring evaluator scoring job relevance.
+            predicted_score = ranking_model.predict(
+                [features]
+            )[0]
 
-Candidate Experience: {CANDIDATE_EXPERIENCE_YEARS}
+            predicted_score = max(
+                0,
+                min(
+                    10,
+                    predicted_score
+                )
+            )
 
-Candidate Profile:
-{RESUME_SUMMARY}
+        except Exception:
 
-Job Title:
-{job.get('job_title')}
+            predicted_score = pre_score
 
-Required Experience:
-{job.get('experience_required')}
+    else:
 
-Job Description:
-{job_text}
+        predicted_score = pre_score
 
-Rules:
-- Focus on skills and backend relevance
-- Reduce score if experience gap is high, but do not overly penalize strong skill matches
-- Early-career candidates can still fit roles if tech stack matches well
-- Ignore salary/company reputation
-
-Return JSON:
-{{
-"final_score": integer (0-10),
-"reason": "short explanation for the score, focusing on key factors in 50 words or less"
-}}
-"""
-
-        response = client.chat.completions.create(
-            model="gpt-5-mini",
-            max_completion_tokens=1000,
-            response_format={"type": "json_object"},
-            messages=[
-                {"role": "system", "content": "You are a practical evaluator."},
-                {"role": "user", "content": prompt}
-            ]
-        )
-
-        result = json.loads(response.choices[0].message.content)
-        gpt_score = int(result.get("final_score", 0))
-        reason = result.get("reason", "")
-
-    except Exception as e:
-        print("GPT Error:", str(e))
-        gpt_score = 0
-        reason = f"GPT evaluation failed: {e}"
-        print(response.choices[0].message)
-        print(repr(response.choices[0].message.content))
-
-    # ==============================
-    # FINAL SCORE (BALANCED)
-    # ==============================
-    final_score = (
-        pre_score * 0.5 +
-        gpt_score * 0.5
+    reason = (
+        f"Similarity={emb_score:.1f}, "
+        f"Skills={skill_score:.1f}, "
+        f"Experience={exp_score:.1f}"
     )
-    return round(pre_score, 2),gpt_score,round(final_score, 2), reason
+
+    return (
+        round(pre_score, 2),
+        round(predicted_score, 2),
+        round(predicted_score, 2),
+        reason
+    )

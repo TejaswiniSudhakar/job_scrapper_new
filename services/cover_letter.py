@@ -8,9 +8,9 @@ from services.logging_utils import get_logger
 # LOAD ENV
 # ==============================
 load_dotenv()
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-CANDIDATE = APP_CONFIG["candidate"]
-logger = get_logger("cover_letter")
+# client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+# CANDIDATE = APP_CONFIG["candidate"]
+# logger = get_logger("cover_letter")
 
 
 # ==============================
@@ -55,14 +55,14 @@ Requirements:
 # ==============================
 # NEW: STREAMING VERSION
 # ==============================
-def generate_cover_letter_for_job(job):
+# def generate_cover_letter_for_job(job):
 
-    try:
-        return generate_letter(
-            job.get("job_title", ""),
-            job.get("company_name", ""),
-            job.get("job_description", "")
-        )
-    except Exception as e:
-        logger.exception("Cover letter failed: %s", e)
-        return ""
+#     try:
+#         return generate_letter(
+#             job.get("job_title", ""),
+#             job.get("company_name", ""),
+#             job.get("job_description", "")
+#         )
+#     except Exception as e:
+#         logger.exception("Cover letter failed: %s", e)
+#         return ""
