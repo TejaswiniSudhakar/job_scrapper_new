@@ -156,7 +156,7 @@ export function JobGrid({ jobs }: { jobs: Job[] }) {
       const idxB = orderMap.get(b.data?.id ?? "") ?? Number.MAX_SAFE_INTEGER;
       return idxA - idxB;
     });
-  }, []);
+  }, [jobs]);
 
   function getRowClasses(data?: Job) {
     return [data?.status === "APPLIED" ? "applied-job-row" : "", data?.isNew ? "new-job-row" : ""]

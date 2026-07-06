@@ -88,6 +88,7 @@ def request_shutdown(signum=None, frame=None):
 
 
 def install_shutdown_handlers():
+    atexit.register(quit_all_drivers)
     atexit.register(release_lock)
 
     for signum in (signal.SIGINT, signal.SIGTERM):

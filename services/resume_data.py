@@ -45,7 +45,7 @@ RESUME_DATA = {
             "company": "Tata Consultancy Services",
             "location": "Bengaluru, India",
             "start": "Aug 2024",
-            "end": "Present",
+            "end": "Dec 2025",
             "bullets": [
                 # Backend / Java / Spring
                 "Developed and enhanced backend data processing modules using Java, Spring Boot, and PL/SQL, supporting financial systems handling 100K+ records per day",
