@@ -15,6 +15,25 @@ THRESHOLD = APP_CONFIG["ranking"]["threshold"]
 MAX_EXPERIENCE_YEARS = 3
 logger = get_logger("processor")
 
+# Job title must contain at least one of these to be considered IT-relevant
+IT_TITLE_KEYWORDS = [
+    "software", "developer", "engineer", "programming", "programmer",
+    "backend", "frontend", "fullstack", "full stack", "full-stack",
+    "devops", "sre", "cloud", "platform", "infrastructure",
+    "data engineer", "data scientist", "data analyst", "machine learning", "ml ",
+    "ai ", "artificial intelligence", "deep learning", "nlp",
+    "java", "python", "golang", "node", "react", "angular",
+    "microservices", "api", "web developer",
+    "database", "dba", "sql", "etl",
+    "qa", "sdet", "test automation", "quality",
+    "security", "cybersecurity", "infosec",
+    "architect", "technical lead", "tech lead",
+    "systems", "network", "linux", "unix",
+    "mobile", "android", "ios", "flutter",
+    "blockchain", "embedded", "firmware",
+    "it ", "information technology",
+]
+
 
 def _exceeds_max_experience(exp_text):
     """Return True if the job requires more than MAX_EXPERIENCE_YEARS."""
@@ -40,6 +59,13 @@ def processor():
             # ---- Deduplication ----
             if is_seen(job_id):
                 logger.info("Duplicate skipped: %s", job["job_title"])
+                continue
+
+            # ---- Title relevance filter (IT roles only) ----
+            title_lower = job.get("job_title", "").lower()
+            if not any(kw in title_lower for kw in IT_TITLE_KEYWORDS):
+                mark_seen(job_id)
+                logger.info("Skipped (non-IT title): %s", job["job_title"])
                 continue
 
             # ---- Experience filter ----
