@@ -151,7 +151,6 @@ def _build_ats_summary(job_title, jd_keywords, profile_name):
     # Pick top keywords to weave into summary
     priority_skills = []
     for kw in jd_keywords:
-        # Check if candidate actually has this skill
         all_candidate_skills = set()
         for skills in data["skills"].values():
             all_candidate_skills.update(s.lower() for s in skills)
@@ -160,25 +159,38 @@ def _build_ats_summary(job_title, jd_keywords, profile_name):
         if kw in all_candidate_skills:
             priority_skills.append(kw)
 
-    # Cap at 8 most important skills for the summary
-    priority_skills = priority_skills[:8]
+    priority_skills = priority_skills[:10]
+    skill_str = ", ".join(s.title() if len(s) > 3 else s.upper() for s in priority_skills[:8])
 
-    # Build summary with job title and matched keywords
-    skill_str = ", ".join(s.title() if len(s) > 3 else s.upper() for s in priority_skills[:6])
+    # Build a fuller summary with job title, skills, and profile-specific content
+    closers = {
+        "Backend": (
+            "Experienced in building scalable backend services, REST APIs, and distributed systems. "
+            "Strong foundation in database optimization, microservices architecture, and enterprise application development. "
+            "Hands-on experience with CI/CD automation, containerization, and Agile development practices."
+        ),
+        "cloud_engineer": (
+            "Experienced in cloud infrastructure, containerization, and CI/CD automation. "
+            "Strong foundation in infrastructure-as-code, container orchestration, and monitoring. "
+            "Hands-on experience with serverless architectures, auto-scaling, and cost optimization."
+        ),
+        "data_engineer": (
+            "Experienced in building data pipelines, ETL workflows, and large-scale data processing. "
+            "Strong foundation in data modeling, workflow orchestration, and database optimization. "
+            "Hands-on experience with batch processing, data quality management, and analytics engineering."
+        ),
+        "ML": (
+            "Experienced in building and deploying machine learning models in production environments. "
+            "Strong foundation in feature engineering, model training, and experiment tracking. "
+            "Hands-on experience with NLP, deep learning frameworks, and model serving at scale."
+        ),
+    }
 
     summary = (
         f"{title_clean} with {CANDIDATE_YEARS} years of hands-on experience. "
-        f"Proficient in {skill_str}. "
+        f"Skilled in {skill_str}. "
+        f"{closers.get(profile_name, closers['Backend'])}"
     )
-
-    # Add profile-specific closer
-    closers = {
-        "Backend": "Experienced in building scalable backend services, REST APIs, and distributed systems.",
-        "cloud_engineer": "Experienced in cloud infrastructure, containerization, and CI/CD automation.",
-        "data_engineer": "Experienced in building data pipelines, ETL workflows, and large-scale data processing.",
-        "ML": "Experienced in building and deploying machine learning models in production environments.",
-    }
-    summary += closers.get(profile_name, closers["Backend"])
 
     return summary
 
@@ -276,130 +288,131 @@ def _select_projects(projects, jd_keywords, max_items=3):
 # ==============================
 
 def _generate_latex(job, profile_name, jd_keywords):
-    """Generate ATS-optimized LaTeX document.
-    - Single column (ATS-friendly)
-    - No graphics or tables
-    - Keywords from JD woven throughout
-    - Clean section headers ATS can parse
-    """
+    """Generate ATS-optimized LaTeX document matching the candidate's existing format."""
     data = RESUME_DATA
     job_title = str(job.get("job_title", "Software Engineer"))
 
-    # ATS-optimized summary with job title and JD keywords
     summary = _build_ats_summary(job_title, jd_keywords, profile_name)
-
-    # Only skills from the JD
     skills = _build_ats_skills_section(jd_keywords)
 
-    # Experience bullets selected by JD keyword density
     experience_sections = []
     for exp in data["experience"]:
-        bullets = _select_ats_bullets(exp["bullets"], exp.get("tags", []), jd_keywords, max_bullets=5)
+        # Primary role gets more bullets, internship gets fewer
+        is_primary = exp.get("end", "") == "Present" or exp == data["experience"][0]
+        max_b = 7 if is_primary else 5
+        bullets = _select_ats_bullets(exp["bullets"], exp.get("tags", []), jd_keywords, max_bullets=max_b)
         experience_sections.append({**exp, "bullets": bullets})
 
-    # Projects most relevant to JD
-    projects = _select_projects(data["projects"], jd_keywords, max_items=2)
+    projects = _select_projects(data["projects"], jd_keywords, max_items=3)
 
-    # Build LaTeX - clean ATS-parseable format
-    latex = r"""\documentclass[11pt,a4paper]{article}
+    # Preamble matching existing resume format
+    latex = r"""\documentclass[a4paper,10pt]{article}
 
-\usepackage[margin=0.55in]{geometry}
+\usepackage[left=0.6in,right=0.6in,top=0.6in,bottom=0.6in]{geometry}
 \usepackage{enumitem}
+\usepackage[hidelinks]{hyperref}
 \usepackage{titlesec}
-\usepackage{hyperref}
-\usepackage[T1]{fontenc}
-\usepackage{lmodern}
+\usepackage{multicol}
+\usepackage{xcolor}
 
-\pagestyle{empty}
 \setlength{\parindent}{0pt}
-\setlength{\parskip}{0pt}
+\setlist[itemize]{leftmargin=*, itemsep=2pt, topsep=2pt}
 
-\titleformat{\section}{\large\bfseries\uppercase}{}{0em}{}[\titlerule]
-\titlespacing*{\section}{0pt}{8pt}{5pt}
-
-\setlist[itemize]{nosep, leftmargin=16pt, label=\textbullet, topsep=2pt}
+\titleformat{\section}
+{\large\bfseries}
+{}
+{0em}
+{}[\titlerule]
 
 \begin{document}
 
-% ===== HEADER =====
 \begin{center}
-    {\LARGE\bfseries """ + _escape_latex(data["name"]) + r"""}\\[3pt]
-    """ + _escape_latex(data["location"]) + r""" \quad $\vert$ \quad """ + _escape_latex(data["phone"]) + r""" \quad $\vert$ \quad """ + _escape_latex(data["email"]) + r"""\\[2pt]
-    \href{https://""" + data["linkedin"] + r"""}{""" + _escape_latex(data["linkedin"]) + r"""} \quad $\vert$ \quad \href{https://""" + data["github"] + r"""}{""" + _escape_latex(data["github"]) + r"""}
+    {\LARGE \textbf{""" + _escape_latex(data["name"]) + r"""}}\\[4pt]
+    """ + _escape_latex(data["phone"]) + r""" \;|\;
+    \href{mailto:""" + data["email"] + r"""}{""" + _escape_latex(data["email"]) + r"""} \;|\;
+    LinkedIn \;|\; GitHub \;|\; LeetCode
 \end{center}
 
-% ===== SUMMARY =====
-\section{Summary}
+%------------------------------------------------
+
+\section*{Summary}
+
 """ + _escape_latex(summary) + r"""
 
-% ===== SKILLS (JD-matched only) =====
-\section{Technical Skills}
-\begin{itemize}[leftmargin=0pt, label={}]
+%------------------------------------------------
+
+\section*{Education}
+
 """
 
-    category_labels = {
-        "languages": "Languages",
-        "frameworks": "Frameworks \\& Libraries",
-        "databases": "Databases",
-        "cloud_devops": "Cloud \\& DevOps",
-        "data_ml": "Data \\& ML",
-        "tools": "Tools \\& Practices",
-    }
-    for category, skill_list in skills.items():
-        label = category_labels.get(category, category.replace("_", " ").title())
-        latex += r"    \item \textbf{" + label + r":} " + ", ".join(skill_list) + "\n"
+    # Education
+    for edu in data["education"]:
+        latex += r"\textbf{" + _escape_latex(edu["institution"]) + r"}, " + _escape_latex(edu["location"]) + r"\\" + "\n"
+        latex += _escape_latex(edu["degree"]) + r" \hfill " + _escape_latex(edu["year"]) + r"\\" + "\n"
+        if edu.get("gpa"):
+            latex += "CGPA: " + edu["gpa"] + "\n"
+        latex += "\n"
 
-    latex += r"""\end{itemize}
+    # Experience
+    latex += r"""%------------------------------------------------
 
-% ===== EXPERIENCE =====
-\section{Experience}
+\section*{Experience}
+
 """
 
-    for exp in experience_sections:
-        latex += r"\textbf{" + _escape_latex(exp["title"]) + r"} \hfill " + _escape_latex(exp["start"]) + " -- " + _escape_latex(exp["end"]) + r"\\" + "\n"
-        latex += r"\textit{" + _escape_latex(exp["company"]) + r"} \hfill " + _escape_latex(exp["location"]) + r"\\" + "\n"
+    for i, exp in enumerate(experience_sections):
+        latex += r"\textbf{" + _escape_latex(exp["company"]) + r"} \hfill " + _escape_latex(exp["start"]) + " -- " + _escape_latex(exp["end"]) + r"\\" + "\n"
+        latex += r"\textit{" + _escape_latex(exp["title"]) + r"}" + "\n\n"
         latex += r"\begin{itemize}" + "\n"
         for bullet in exp["bullets"]:
-            latex += r"    \item " + bullet + "\n"
+            latex += r"    \item " + _escape_latex(bullet) + "\n"
         latex += r"\end{itemize}" + "\n"
-        latex += r"\vspace{3pt}" + "\n"
+        if i < len(experience_sections) - 1:
+            latex += "\n" + r"\vspace{4pt}" + "\n\n"
 
-    # ===== PROJECTS =====
+    # Projects
     latex += r"""
-% ===== PROJECTS =====
-\section{Projects}
+%------------------------------------------------
+
+\section*{Projects}
+
 """
-    for proj in projects:
-        bullets = _select_ats_bullets(proj["bullets"], proj.get("tags", []), jd_keywords, max_bullets=2)
-        latex += r"\textbf{" + _escape_latex(proj["name"]) + r"} $\vert$ \textit{" + _escape_latex(proj["tech"]) + r"}\\" + "\n"
+
+    for i, proj in enumerate(projects):
+        bullets = _select_ats_bullets(proj["bullets"], proj.get("tags", []), jd_keywords, max_bullets=6)
+        latex += r"\textbf{" + _escape_latex(proj["name"]) + r"}\\" + "\n"
+        latex += r"\textit{" + _escape_latex(proj["tech"]) + r"}" + "\n\n"
         latex += r"\begin{itemize}" + "\n"
         for bullet in bullets:
             latex += r"    \item " + _escape_latex(bullet) + "\n"
         latex += r"\end{itemize}" + "\n"
-        latex += r"\vspace{3pt}" + "\n"
+        if i < len(projects) - 1:
+            latex += "\n" + r"\vspace{4pt}" + "\n\n"
 
-    # ===== EDUCATION =====
+    # Technical Skills
     latex += r"""
-% ===== EDUCATION =====
-\section{Education}
-"""
-    for edu in data["education"]:
-        latex += r"\textbf{" + _escape_latex(edu["degree"]) + r"} \hfill " + _escape_latex(edu["year"]) + r"\\" + "\n"
-        latex += r"\textit{" + _escape_latex(edu["institution"]) + r"} \hfill " + _escape_latex(edu["location"])
-        if edu.get("gpa"):
-            latex += r" \quad GPA: " + edu["gpa"]
-        latex += "\n"
+%------------------------------------------------
 
-    # ===== CERTIFICATIONS =====
-    if data.get("certifications"):
-        latex += r"""
-% ===== CERTIFICATIONS =====
-\section{Certifications}
-\begin{itemize}
+\section*{Technical Skills}
+
 """
-        for cert in data["certifications"]:
-            latex += r"    \item " + _escape_latex(cert["name"]) + " (" + cert["year"] + ")\n"
-        latex += r"\end{itemize}" + "\n"
+
+    category_labels = {
+        "languages": "Programming Languages",
+        "frameworks": "Frameworks \\& Libraries",
+        "databases": "Databases \\& Data Warehousing",
+        "cloud_devops": "Cloud \\& DevOps",
+        "data_ml": "Data Science \\& Analytics",
+        "tools": "Core Concepts",
+    }
+
+    skill_entries = list(skills.items())
+    for i, (category, skill_list) in enumerate(skill_entries):
+        label = category_labels.get(category, category.replace("_", " ").title())
+        latex += r"\textbf{" + label + r":}" + "\n"
+        latex += ", ".join(_escape_latex(s) for s in skill_list) + "\n"
+        if i < len(skill_entries) - 1:
+            latex += "\n" + r"\vspace{4pt}" + "\n\n"
 
     latex += r"""
 \end{document}

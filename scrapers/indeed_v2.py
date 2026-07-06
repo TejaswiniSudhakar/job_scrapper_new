@@ -263,7 +263,7 @@ def indeed_v2():
                                         "company_name": company_name,
                                         "location": location,
                                         "job_description": enriched_description,
-                                        "source": "Indeed",
+                                        "source": "Indeed_v2",
                                     }
 
                                     if job_exists(job_data["job_url"]):
