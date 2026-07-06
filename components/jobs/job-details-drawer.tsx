@@ -1,11 +1,13 @@
 "use client";
 
 import { AnimatePresence, motion } from "framer-motion";
-import { ExternalLink, Trash2, Undo2, X } from "lucide-react";
+import { ExternalLink, FileText, Trash2, Undo2, X } from "lucide-react";
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { useDashboardStore } from "@/store/dashboard-store";
+import { generateResume } from "@/lib/api/jobs";
 import type { Job, JobStatus } from "@/types/jobs";
 
 const statuses: JobStatus[] = ["UNAPPLIED", "APPLIED", "INTERVIEW", "REJECTED", "OFFER", "EXPIRED", "SAVED"];
@@ -65,7 +67,51 @@ export function JobDetailsDrawer() {
   const selectJob = useDashboardStore((state) => state.selectJob);
   const updateStatus = useDashboardStore((state) => state.updateStatus);
   const deleteJob = useDashboardStore((state) => state.deleteJob);
+  const pushToast = useDashboardStore((state) => state.pushToast);
   const recommendedResume = job ? getRecommendedResume(job) : resumeRules[3];
+  const [generatingResume, setGeneratingResume] = useState(false);
+
+  async function handleGenerateResume() {
+    if (!job) return;
+    setGeneratingResume(true);
+    try {
+      const result = await generateResume({
+        jobTitle: job.jobTitle,
+        company: job.company,
+        description: job.description,
+        applyLink: job.applyLink,
+        experienceRequired: job.experienceRequired,
+      });
+
+      if (result.error) {
+        pushToast({ tone: "danger", title: "Resume generation failed", description: result.error });
+      } else if (result.pdfBase64) {
+        // Download the PDF
+        const blob = new Blob([Uint8Array.from(atob(result.pdfBase64), (c) => c.charCodeAt(0))], { type: "application/pdf" });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = `Resume_${job.company}_${job.jobTitle}.pdf`.replace(/[^a-zA-Z0-9_.\- ]/g, "_");
+        link.click();
+        URL.revokeObjectURL(url);
+        pushToast({
+          tone: "success",
+          title: "Resume generated",
+          description: `Tailored for ${job.jobTitle} at ${job.company} (${result.profile} profile)`,
+        });
+      } else {
+        pushToast({
+          tone: "warning",
+          title: "LaTeX generated (no PDF)",
+          description: `Install pdflatex to compile. File: ${result.texPath}`,
+        });
+      }
+    } catch {
+      pushToast({ tone: "danger", title: "Resume generation failed", description: "Network or server error" });
+    } finally {
+      setGeneratingResume(false);
+    }
+  }
 
   return (
     <AnimatePresence>
@@ -121,6 +167,10 @@ export function JobDetailsDrawer() {
                 <ExternalLink className="h-4 w-4" />
                 Direct Apply
               </Button>
+              <Button onClick={handleGenerateResume} disabled={generatingResume}>
+                <FileText className="h-4 w-4" />
+                {generatingResume ? "Generating..." : "Generate Resume"}
+              </Button>
               <select
                 className="h-9 rounded-md border border-border bg-background px-3 text-sm"
                 value={job.status}
@@ -132,7 +182,7 @@ export function JobDetailsDrawer() {
                   </option>
                 ))}
               </select>
-              <Button>
+              <Button onClick={() => updateStatus(job.id, "EXPIRED")}>
                 <Undo2 className="h-4 w-4" />
                 Ignore
               </Button>

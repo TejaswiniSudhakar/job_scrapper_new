@@ -1,5 +1,6 @@
 import sys
 import os
+import re
 from config import APP_CONFIG
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -11,7 +12,18 @@ from services.logging_utils import get_logger
 from queue_manager import job_queue
 
 THRESHOLD = APP_CONFIG["ranking"]["threshold"]
+MAX_EXPERIENCE_YEARS = 3
 logger = get_logger("processor")
+
+
+def _exceeds_max_experience(exp_text):
+    """Return True if the job requires more than MAX_EXPERIENCE_YEARS."""
+    numbers = re.findall(r"\d+", str(exp_text))
+    if not numbers:
+        return False
+    # Use the minimum number in the range as the requirement
+    required = min(int(n) for n in numbers if 0 <= int(n) <= 25)
+    return required > MAX_EXPERIENCE_YEARS if numbers else False
 
 
 def processor():
@@ -28,6 +40,13 @@ def processor():
             # ---- Deduplication ----
             if is_seen(job_id):
                 logger.info("Duplicate skipped: %s", job["job_title"])
+                continue
+
+            # ---- Experience filter ----
+            exp_text = job.get("experience_required", "")
+            if _exceeds_max_experience(exp_text):
+                mark_seen(job_id)
+                logger.info("Skipped (>%d yrs required): %s", MAX_EXPERIENCE_YEARS, job["job_title"])
                 continue
 
             # ---- Ranking ----

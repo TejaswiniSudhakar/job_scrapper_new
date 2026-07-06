@@ -36,6 +36,7 @@ out/
 # Build artifacts
 dist/
 build/
+generated_resumes/
 
 # OS files
 .DS_Store

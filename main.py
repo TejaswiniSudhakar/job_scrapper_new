@@ -9,7 +9,7 @@ import sys
 
 from services.driver_registry import quit_all_drivers
 from services.ranker import init
-from services.storage import init_db
+from services.storage import init_db, cleanup_old_jobs
 from services.logging_utils import configure_logging, get_logger
 
 from pipeline.processor import processor
@@ -145,6 +145,7 @@ def start_system():
 
     # Initialize DB / Ranking
     init_db()
+    cleanup_old_jobs()
     init()
 
     # Processor

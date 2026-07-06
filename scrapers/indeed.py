@@ -1,4 +1,3 @@
-import random
 import re
 import subprocess
 import time
@@ -13,6 +12,21 @@ from selenium.webdriver.support.ui import WebDriverWait
 from config import APP_CONFIG
 from pipeline.deduplicator import get_job_id, hash_job_url, is_passed, is_seen, mark_passed
 from queue_manager import enqueue_job
+from scrapers.indeed_common import (
+    IndeedVerificationError,
+    find_job_link_element,
+    get_company_name,
+    get_detail_location,
+    get_job_description,
+    get_next_page_button,
+    get_salary,
+    get_visible_job_links,
+    human_move_and_click,
+    human_scroll,
+    is_verification_page,
+    random_pause,
+    wait_for_job_content,
+)
 from services.logging_utils import get_logger, log_cycle_summary, log_iteration_summary
 from services.storage import job_exists
 
@@ -30,13 +44,6 @@ LOCATION = INDEED_CONFIG["location"]
 # based bot detection than per-click pacing does.
 KEYWORDS_PER_BATCH = 5
 
-
-class IndeedVerificationError(Exception):
-    pass
-
-
-def random_pause(min_seconds=1.0, max_seconds=3.0):
-    time.sleep(random.uniform(min_seconds, max_seconds))
 
 
 def _get_chrome_major_version():
@@ -70,210 +77,6 @@ def create_driver():
     register_driver(driver)
     return driver
 
-
-def is_verification_page(driver):
-    try:
-        page_source = driver.page_source.lower()
-        strong_markers = ["additional verification required"]
-        return any(marker in page_source for marker in strong_markers)
-    except Exception:
-        return False
-
-
-def get_next_page_button(driver, timeout=10):
-    def locate_visible_next_button(current_driver):
-        buttons = current_driver.find_elements(By.XPATH, "//a[@aria-label='Next Page']")
-        for button in buttons:
-            try:
-                if (
-                    button.is_displayed()
-                    and button.is_enabled()
-                    and button.size["width"] > 0
-                    and button.size["height"] > 0
-                ):
-                    return button
-            except Exception:
-                continue
-        return False
-
-    return WebDriverWait(driver, timeout).until(locate_visible_next_button)
-
-
-def get_visible_job_links(driver):
-    visible_jobs = []
-    job_elements = driver.find_elements(By.XPATH, "//a[@data-jk]")
-
-    for element in job_elements:
-        try:
-            job_id = element.get_attribute("data-jk")
-            href = element.get_attribute("href")
-            title = element.text.strip()
-            if (
-                job_id
-                and href
-                and element.is_displayed()
-                and element.is_enabled()
-                and element.size["width"] > 0
-                and element.size["height"] > 0
-            ):
-                visible_jobs.append({"job_id": job_id, "href": href, "title": title})
-        except Exception:
-            continue
-
-    unique_jobs = []
-    seen_job_ids = set()
-    for job in visible_jobs:
-        if job["job_id"] not in seen_job_ids:
-            seen_job_ids.add(job["job_id"])
-            unique_jobs.append(job)
-    return unique_jobs
-
-
-def find_job_link_element(driver, job_info, timeout=10):
-    job_id = job_info.get("job_id")
-
-    def locate_job(current_driver):
-        candidates = current_driver.find_elements(By.XPATH, f"//a[@data-jk='{job_id}']")
-        for candidate in candidates:
-            try:
-                if (
-                    candidate.is_displayed()
-                    and candidate.is_enabled()
-                    and candidate.size["width"] > 0
-                    and candidate.size["height"] > 0
-                ):
-                    return candidate
-            except Exception:
-                continue
-        return False
-
-    return WebDriverWait(driver, timeout).until(locate_job)
-
-
-def human_scroll(driver, target_element):
-    driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", target_element)
-    random_pause(0.8, 1.8)
-    target_y = target_element.location["y"]
-    current_y = driver.execute_script("return window.pageYOffset;")
-
-    while current_y < target_y:
-        step = random.randint(150, 400)
-        driver.execute_script(f"window.scrollBy(0, {step});")
-        random_pause(0.4, 1.3)
-        current_y += step
-
-        if random.random() < 0.2:
-            back = random.randint(50, 120)
-            driver.execute_script(f"window.scrollBy(0, -{back});")
-            random_pause(0.2, 0.6)
-
-    driver.execute_script("window.scrollBy(0, 80);")
-    random_pause(0.2, 0.5)
-
-
-def human_move_and_click(driver, element):
-    driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", element)
-    WebDriverWait(driver, 10).until(
-        lambda current_driver: element.is_displayed()
-        and element.is_enabled()
-        and element.size["width"] > 0
-        and element.size["height"] > 0
-    )
-    random_pause(1.0, 2.5)
-    driver.execute_script("arguments[0].click();", element)
-    random_pause(1.5, 3.5)
-
-
-def get_job_description(driver):
-    """
-    Extract the job description text from the detail panel using Selenium
-    .text — NOT BeautifulSoup get_text. This must match the extraction
-    method used inside wait_for_job_content so that the previous_description
-    snapshot and the current_text comparison are formatted identically.
-    Using different methods (BS4 vs Selenium) produces subtly different
-    whitespace/newline output for the same HTML, which makes the
-    != comparison unreliable and allows stale panel content to be read
-    as if it were the newly-loaded job.
-    """
-    elements = driver.find_elements(By.ID, "jobDescriptionText")
-    if elements:
-        return elements[0].text.strip()
-    return ""
-
-
-def wait_for_job_content(driver, previous_description="", timeout=20):
-    """
-    Waits for the job-detail panel to update after a click.
-
-    Indeed's split-view layout keeps the same #jobDescriptionText element
-    across job switches and just swaps its inner content via JS - so
-    checking for the element's *presence* isn't enough, it can already be
-    there from the previously-selected job. We instead wait for the text
-    inside it to be non-empty AND different from whatever was showing
-    before this click, so we know the panel has actually re-rendered for
-    the newly clicked job rather than still showing stale content.
-    """
-    def content_loaded(current_driver):
-        if is_verification_page(current_driver):
-            return "verification"
-
-        description_elements = current_driver.find_elements(By.ID, "jobDescriptionText")
-        if not description_elements:
-            return False
-
-        current_text = description_elements[0].text.strip()
-
-        if current_text and current_text != previous_description:
-            return "description"
-
-        return False
-
-    return WebDriverWait(driver, timeout).until(content_loaded)
-
-
-def get_detail_location(driver):
-    try:
-        location_elem = WebDriverWait(driver, 10).until(
-            EC.presence_of_element_located(
-                (By.XPATH, "//div[@data-testid='inlineHeader-companyLocation']")
-            )
-        )
-        return location_elem.text.strip()
-    except Exception:
-        return ""
-
-
-def get_salary(driver):
-    selectors = [
-        (By.ID, "salaryInfoAndJobType"),
-        (By.XPATH, "//div[@id='salaryInfoAndJobType']//span"),
-        (By.XPATH, "//span[contains(text(), '₹')]"),
-    ]
-    for by, selector in selectors:
-        try:
-            element = driver.find_element(by, selector)
-            text = element.text.strip()
-            if text:
-                return text
-        except Exception:
-            continue
-    return ""
-
-
-def get_company_name(driver):
-    selectors = [
-        (By.XPATH, "//div[@data-testid='inlineHeader-companyName']"),
-        (By.CSS_SELECTOR, "[data-testid='company-name']"),
-    ]
-    for by, selector in selectors:
-        try:
-            element = driver.find_element(by, selector)
-            text = element.text.strip()
-            if text:
-                return text
-        except Exception:
-            continue
-    return "Unknown"
 
 
 def Indeed(source_label=SOURCE_LABEL):

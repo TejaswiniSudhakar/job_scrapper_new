@@ -47,6 +47,8 @@ def init_db():
 
         ensure_column(cursor, "salary", "TEXT")
         ensure_column(cursor, "location", "TEXT")
+        ensure_column(cursor, "status", "TEXT")
+        ensure_column(cursor, "applied_at", "TIMESTAMP")
 
         conn.commit()
 
@@ -115,8 +117,9 @@ def save_job(job, score):
                     gpt_score,
                     reason,
                     cover_letter,
+                    status,
                     created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     url_hash,
                     url,
@@ -126,12 +129,13 @@ def save_job(job, score):
                     job.get("experience_required", "Not mentioned"),
                     job.get("salary", "Not mentioned"),
                     job.get("location", ""),
-                    job.get("job_description", "")[:4000],  # Truncate to fit in DB
+                    job.get("job_description", "")[:4000],
                     job.get("final_score"),
                     job.get("pre_score"),
                     job.get("gpt_score"),
                     job.get("reason", "No reason provided"),
                     job.get("cover_letter"),
+                    "UNAPPLIED",
                     datetime.now()
                 ))
 
@@ -139,21 +143,40 @@ def save_job(job, score):
                 print("✅ Job saved successfully")
 
         except sqlite3.IntegrityError:
-            # Duplicate (already exists)
             pass
 
 
 # ==============================
 # OPTIONAL: CLEAN OLD JOBS
 # ==============================
-def cleanup_old_jobs(days=7):
+def update_job_status(url_hash, status):
+    """Update job status and set applied_at timestamp when status is APPLIED."""
+    with lock:
+        with sqlite3.connect(DB_NAME) as conn:
+            cursor = conn.cursor()
+            if status == "APPLIED":
+                cursor.execute(
+                    "UPDATE jobs SET status = ?, applied_at = ? WHERE url_hash = ?",
+                    (status, datetime.now(), url_hash)
+                )
+            else:
+                cursor.execute(
+                    "UPDATE jobs SET status = ? WHERE url_hash = ?",
+                    (status, url_hash)
+                )
+            conn.commit()
+            return cursor.rowcount > 0
 
+
+def cleanup_old_jobs(days=14):
+    """Delete jobs older than `days` from the DB only. CSV is not affected."""
     with sqlite3.connect(DB_NAME) as conn:
         cursor = conn.cursor()
-
-        cursor.execute("""
-        DELETE FROM jobs
-        WHERE created_at < datetime('now', ?)
-        """, (f"-{days} days",))
-
+        cursor.execute(
+            "DELETE FROM jobs WHERE created_at < datetime('now', ?)",
+            (f"-{days} days",)
+        )
+        deleted = cursor.rowcount
         conn.commit()
+        if deleted:
+            print(f"🧹 Cleaned up {deleted} job(s) older than {days} days from DB")

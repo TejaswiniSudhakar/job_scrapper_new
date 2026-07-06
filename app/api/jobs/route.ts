@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server";
 import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
-import type { Job, JobStatus, ScraperSource, WorkMode } from "@/types/jobs";
+import { parseCsv, type CsvRow } from "@/lib/csv-parser";
+import { normalizeDate, normalizeOptionalDate, normalizeSource, normalizeStatus, scoreToTen } from "@/lib/normalize";
+import type { Job, WorkMode } from "@/types/jobs";
 
 const jobsCsvPath = path.join(process.env.JOB_SCRAPER_DATA_DIR ?? process.cwd(), "jobs.csv");
-const statuses: JobStatus[] = ["UNAPPLIED", "APPLIED", "INTERVIEW", "REJECTED", "OFFER", "EXPIRED", "SAVED"];
 
-type CsvRow = Record<string, string>;
 let jobsCache: { mtimeMs: number; jobs: Job[] } | undefined;
 
 export async function GET() {
@@ -32,60 +32,15 @@ async function readJobs() {
 
   const csv = await readFile(jobsCsvPath, "utf8");
   const rows = parseCsv(csv);
-  const jobs = rows.map(mapRowToJob).sort((a, b) => Date.parse(b.scrapedTime) - Date.parse(a.scrapedTime));
+  const jobs = rows
+    .filter((row) => row.status?.toUpperCase() !== "DELETED")
+    .map(mapRowToJob)
+    .sort((a, b) => Date.parse(b.scrapedTime) - Date.parse(a.scrapedTime));
   jobsCache = { mtimeMs: file.mtimeMs, jobs };
 
   return jobs;
 }
 
-function parseCsv(csv: string): CsvRow[] {
-  const rows: string[][] = [];
-  let row: string[] = [];
-  let cell = "";
-  let inQuotes = false;
-
-  for (let index = 0; index < csv.length; index += 1) {
-    const char = csv[index];
-    const next = csv[index + 1];
-
-    if (char === '"') {
-      if (inQuotes && next === '"') {
-        cell += '"';
-        index += 1;
-      } else {
-        inQuotes = !inQuotes;
-      }
-      continue;
-    }
-
-    if (char === "," && !inQuotes) {
-      row.push(cell);
-      cell = "";
-      continue;
-    }
-
-    if ((char === "\n" || char === "\r") && !inQuotes) {
-      if (char === "\r" && next === "\n") index += 1;
-      row.push(cell);
-      if (row.some((value) => value.length > 0)) rows.push(row);
-      row = [];
-      cell = "";
-      continue;
-    }
-
-    cell += char;
-  }
-
-  if (cell.length || row.length) {
-    row.push(cell);
-    rows.push(row);
-  }
-
-  const [headers = [], ...dataRows] = rows;
-  return dataRows.map((values) =>
-    Object.fromEntries(headers.map((header, index) => [header.trim(), values[index]?.trim() ?? ""]))
-  );
-}
 
 function mapRowToJob(row: CsvRow): Job {
   const finalScore = toNumber(row.final_score);
@@ -123,12 +78,7 @@ function mapRowToJob(row: CsvRow): Job {
     benefits: [],
     gptSummary: summarizeDescription(description),
     gptReasoning: row.reason || "No GPT reasoning captured.",
-    scoreBreakdown: {
-      skillMatch: scoreToTen(preScore ?? finalScore ?? 0),
-      salaryMatch: 0,
-      experienceMatch: scoreToTen(gptScore ?? finalScore ?? 0),
-      overallScore: score
-    }
+    scoreBreakdown: parseScoreBreakdown(row.reason, score)
   };
 }
 
@@ -183,17 +133,6 @@ function formatExperience(value: string) {
   if (!numbers.length) return value;
   if (numbers.length >= 2) return `${numbers[0]}-${numbers[1]} years`;
   return `${numbers[0]} years`;
-}
-
-function normalizeSource(source: string): ScraperSource {
-  const normalized = source.toLowerCase();
-  if (normalized.includes("linkedin") && normalized.includes("v2")) return "LinkedIn v2";
-  if (normalized.includes("linkedin")) return "LinkedIn";
-  if (normalized.includes("naukri") && normalized.includes("v2")) return "Naukri v2";
-  if (normalized.includes("naukri")) return "Naukri";
-  if (normalized.includes("indeed") && normalized.includes("v2")) return "Indeed v2";
-  if (normalized.includes("indeed")) return "Indeed";
-  return source.trim() || "Unknown";
 }
 
 function inferWorkMode(text: string): WorkMode {
@@ -259,42 +198,35 @@ function inferLocation(url: string, description: string) {
 
 function inferSkills(description: string) {
   const knownSkills = [
-    "Java",
-    "Spring Boot",
-    "Microservices",
-    "REST",
-    "SQL",
-    "Python",
-    "React",
-    "Next.js",
-    "Node.js",
-    "AWS",
-    "Azure",
-    "Docker",
-    "Selenium"
+    "Java", "Python", "JavaScript", "TypeScript", "Go", "Rust", "C++", "C#",
+    "Spring Boot", "Microservices", "REST", "GraphQL", "gRPC",
+    "SQL", "MySQL", "PostgreSQL", "MongoDB", "Redis", "Cassandra", "Elasticsearch",
+    "AWS", "GCP", "Azure", "Docker", "Kubernetes", "Terraform",
+    "React", "Angular", "Vue", "Next.js", "Node.js",
+    "Kafka", "Spark", "Airflow", "Hadoop",
+    "Machine Learning", "Deep Learning", "TensorFlow", "PyTorch",
+    "Selenium", "CI/CD", "Jenkins", "Git", "Linux"
   ];
 
-  return knownSkills.filter((skill) => description.toLowerCase().includes(skill.toLowerCase())).slice(0, 8);
+  return knownSkills.filter((skill) => description.toLowerCase().includes(skill.toLowerCase())).slice(0, 10);
+}
+
+function parseScoreBreakdown(reason: string, overallScore: number) {
+  const expMatch = reason?.match(/Experience=(\d+(?:\.\d+)?)/);
+  const skillMatch = reason?.match(/Skills=(\d+(?:\.\d+)?)/);
+  const simMatch = reason?.match(/Similarity=(\d+(?:\.\d+)?)/);
+
+  return {
+    skillMatch: skillMatch ? Number(skillMatch[1]) : overallScore,
+    salaryMatch: simMatch ? Number(simMatch[1]) : 0,
+    experienceMatch: expMatch ? Number(expMatch[1]) : overallScore,
+    overallScore
+  };
 }
 
 function summarizeDescription(description: string) {
   const trimmed = description.replace(/\s+/g, " ").trim();
   return trimmed.length > 220 ? `${trimmed.slice(0, 220)}...` : trimmed;
-}
-
-function normalizeDate(value: string) {
-  const parsed = Date.parse(value);
-  return Number.isNaN(parsed) ? new Date().toISOString() : new Date(parsed).toISOString();
-}
-
-function normalizeOptionalDate(value: string) {
-  const parsed = Date.parse(value);
-  return Number.isNaN(parsed) ? undefined : new Date(parsed).toISOString();
-}
-
-function normalizeStatus(value: string): JobStatus {
-  const normalized = value?.toUpperCase();
-  return statuses.includes(normalized as JobStatus) ? (normalized as JobStatus) : "UNAPPLIED";
 }
 
 function toNumber(value: string) {
@@ -303,7 +235,3 @@ function toNumber(value: string) {
   return Number.isFinite(parsed) ? parsed : undefined;
 }
 
-function scoreToTen(score: number) {
-  const normalized = score > 10 ? score / 10 : score;
-  return Math.max(0, Math.min(10, Math.round(normalized * 10) / 10));
-}

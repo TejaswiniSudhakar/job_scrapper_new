@@ -2,6 +2,7 @@
 
 import { create } from "zustand";
 import type { Job, JobFilters, JobStatus, SavedSearch } from "@/types/jobs";
+import { updateJobStatus as apiUpdateJobStatus, deleteJobFromDb } from "@/lib/api/jobs";
 
 type Toast = {
   id: string;
@@ -88,6 +89,9 @@ export const useDashboardStore = create<DashboardState>((set) => ({
       const existing = state.jobs.find((job) => job.id === jobId);
       savePersistedJobState(jobId, { ...existing, deleted: true });
 
+      // Persist to backend DB
+      deleteJobFromDb(jobId).catch(() => {});
+
       return {
         jobs: state.jobs.filter((job) => job.id !== jobId),
         selectedJob: state.selectedJob?.id === jobId ? undefined : state.selectedJob
@@ -101,6 +105,9 @@ export const useDashboardStore = create<DashboardState>((set) => ({
           ? existing?.appliedAt ?? new Date().toISOString()
           : existing?.appliedAt;
       if (existing) savePersistedJobState(jobId, { ...existing, status, appliedAt });
+
+      // Persist to backend DB
+      apiUpdateJobStatus(jobId, status).catch(() => {});
 
       return {
         jobs: state.jobs.map((job) => (job.id === jobId ? { ...job, status, appliedAt } : job)),

@@ -12,6 +12,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 from config import APP_CONFIG
 from pipeline.deduplicator import hash_job_url, is_passed, mark_passed
 from queue_manager import enqueue_job
+from scrapers.common import get_experience_from_description
 from services.driver_registry import register_driver
 from services.logging_utils import get_logger, log_cycle_summary, log_iteration_summary
 from services.storage import job_exists
@@ -155,36 +156,6 @@ def get_total_jobs(driver):
         logger.warning("LinkedIn (v2) job count not available for current page.")
         return 0
 
-
-def get_experience_from_description(job_description):
-    try:
-        desc = job_description.lower().replace("–", "-")
-        patterns = [
-            r"(\d+)\s*\+\s*years?",
-            r"(\d+)\s*-\s*(\d+)\s*years?",
-            r"(\d+)\s*to\s*(\d+)\s*years?",
-            r"minimum\s*(\d+)\s*years?",
-            r"at least\s*(\d+)\s*years?",
-            r"(\d+)\s*years?\s*of\s*experience",
-            r"(\d+)\s*\+\s*yrs?",
-            r"(\d+)\s*-\s*(\d+)\s*yrs?",
-            r"(\d+)\s*to\s*(\d+)\s*yrs?",
-            r"minimum\s*(\d+)\s*yrs?",
-            r"at least\s*(\d+)\s*yrs?",
-            r"(\d+)\s*yrs?\s*of\s*experience",
-        ]
-
-        for pattern in patterns:
-            match = re.search(pattern, desc)
-            if not match:
-                continue
-            if len(match.groups()) == 2:
-                return f"{match.group(1)}-{match.group(2)} years"
-            return f"{match.group(1)} years"
-
-        return "Not mentioned"
-    except Exception:
-        return "Not found"
 
 
 def wait_for_card_content(card, timeout=3):
