@@ -10,7 +10,7 @@ import { Toaster } from "@/components/layout/toaster";
 import { FiltersBar } from "@/components/jobs/filters-bar";
 import { JobDetailsDrawer } from "@/components/jobs/job-details-drawer";
 import { JobGrid } from "@/components/jobs/job-grid";
-import { fetchAnalytics, fetchJobs, fetchSavedSearches } from "@/lib/api/jobs";
+import { fetchAnalytics, fetchJobs } from "@/lib/api/jobs";
 import { useLiveJobs } from "@/hooks/use-live-jobs";
 import { useDashboardStore } from "@/store/dashboard-store";
 import type { Job } from "@/types/jobs";
@@ -40,8 +40,8 @@ function DashboardPage() {
   const jobs = useDashboardStore((state) => state.jobs);
   const setJobs = useDashboardStore((state) => state.setJobs);
   const filters = useDashboardStore((state) => state.filters);
-  const setSavedSearches = useDashboardStore((state) => state.setSavedSearches);
   const pushToast = useDashboardStore((state) => state.pushToast);
+  const debouncedFilters = useDebouncedValue(filters, 250);
 
   const jobsQuery = useQuery({
     queryKey: ["jobs"],
@@ -53,13 +53,8 @@ function DashboardPage() {
   const analyticsQuery = useQuery({
     queryKey: ["analytics"],
     queryFn: fetchAnalytics,
-    refetchInterval: 60_000,
+    refetchInterval: 15_000,
     refetchIntervalInBackground: true
-  });
-
-  const searchesQuery = useQuery({
-    queryKey: ["saved-searches"],
-    queryFn: fetchSavedSearches
   });
 
   useEffect(() => setMounted(true), []);
@@ -86,11 +81,7 @@ function DashboardPage() {
     );
   }, [jobsQuery.data, setJobs]);
 
-  useEffect(() => {
-    if (searchesQuery.data) setSavedSearches(searchesQuery.data);
-  }, [searchesQuery.data, setSavedSearches]);
-
-  const filteredJobs = useMemo(() => applyClientFilters(jobs, filters), [jobs, filters]);
+  const filteredJobs = useMemo(() => applyClientFilters(jobs, debouncedFilters), [jobs, debouncedFilters]);
   const liveAnalytics = useMemo(
     () => (analyticsQuery.data ? buildJobActivityAnalytics(jobs, analyticsQuery.data) : undefined),
     [analyticsQuery.data, jobs]
@@ -174,6 +165,7 @@ function DashboardPage() {
 
 function applyClientFilters(jobs: Job[], filters: ReturnType<typeof useDashboardStore.getState>["filters"]) {
   const filtered = jobs.filter((job) => {
+    if (filters.query && !matchesSearchQuery(job, filters.query)) return false;
     if (filters.minScore && job.gptRelevanceScore < filters.minScore) return false;
     if (filters.sources.length && !filters.sources.includes(job.source)) return false;
     if (filters.workModes.length && !filters.workModes.includes(job.workMode)) return false;
@@ -197,4 +189,35 @@ function applyClientFilters(jobs: Job[], filters: ReturnType<typeof useDashboard
 
 function getStatusSortOrder(status: Job["status"]) {
   return status === "APPLIED" ? 1 : 0;
+}
+
+function matchesSearchQuery(job: Job, query: string) {
+  const normalizedQuery = query.trim().toLowerCase();
+  if (!normalizedQuery) return true;
+
+  return [
+    job.jobTitle,
+    job.company,
+    job.location,
+    job.source,
+    job.description,
+    job.gptSummary,
+    job.gptReasoning,
+    job.requiredSkills.join(" "),
+    job.notes
+  ]
+    .join(" ")
+    .toLowerCase()
+    .includes(normalizedQuery);
+}
+
+function useDebouncedValue<T>(value: T, delayMs: number) {
+  const [debouncedValue, setDebouncedValue] = useState(value);
+
+  useEffect(() => {
+    const timeout = window.setTimeout(() => setDebouncedValue(value), delayMs);
+    return () => window.clearTimeout(timeout);
+  }, [value, delayMs]);
+
+  return debouncedValue;
 }

@@ -3,17 +3,14 @@ import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import type { DashboardAnalytics, JobStatus, ScraperMetric, ScraperSource, ScraperStatus } from "@/types/jobs";
 
-const backendDir =
-  process.env.JOB_SCRAPER_DATA_DIR ??
-  "C:\\Users\\Nishant Chandraker\\Downloads\\private-job-scraper-main\\private-job-scraper-main";
-
-const jobsCsvPath = path.join(backendDir, "jobs.csv");
-const sources: ScraperSource[] = ["LinkedIn", "Naukri", "Indeed", "Company Site"];
+const jobsCsvPath = path.join(process.env.JOB_SCRAPER_DATA_DIR ?? process.cwd(), "jobs.csv");
+const knownSources: ScraperSource[] = ["LinkedIn", "LinkedIn v2", "Naukri", "Naukri v2", "Indeed", "Indeed v2"];
 const statuses: JobStatus[] = ["UNAPPLIED", "APPLIED", "INTERVIEW", "REJECTED", "OFFER", "EXPIRED", "SAVED"];
 
 type AnalyticsJob = {
   source: ScraperSource;
   scrapedTime: string;
+  appliedAt?: string;
   status: JobStatus;
   gptRelevanceScore: number;
 };
@@ -39,15 +36,25 @@ async function readAnalytics() {
   const csv = await readFile(jobsCsvPath, "utf8");
   const jobs = parseCsv(csv).map(mapRowToAnalyticsJob);
   const today = new Date().toDateString();
-  const scrapers: ScraperMetric[] = sources
-    .map((source) => {
-      const sourceJobs = jobs.filter((job) => job.source === source);
-      const latest = sourceJobs[0]?.scrapedTime ?? new Date().toISOString();
+  const sources = [
+    ...knownSources,
+    ...[...new Set(jobs.map((job) => job.source))].filter((source) => !knownSources.includes(source)).sort((a, b) => a.localeCompare(b))
+  ];
+  const scrapers: ScraperMetric[] = sources.map((source) => {
+    const sourceJobs = jobs.filter((job) => job.source === source);
+    const latest =
+      sourceJobs
+        .map((job) => job.scrapedTime)
+        .sort((a, b) => Date.parse(b) - Date.parse(a))[0] ?? new Date().toISOString();
       const status: ScraperStatus = sourceJobs.length ? "Completed" : "Idle";
+      const appliedJobs = sourceJobs.filter((job) => job.status === "APPLIED");
 
       return {
         source,
         jobsFound: sourceJobs.length,
+        jobsFoundToday: sourceJobs.filter((job) => new Date(job.scrapedTime).toDateString() === today).length,
+        jobsApplied: appliedJobs.length,
+        jobsAppliedToday: appliedJobs.filter((job) => isSameDay(job.appliedAt, today)).length,
         activeJobs: sourceJobs.filter((job) => job.status !== "EXPIRED" && job.status !== "REJECTED").length,
         successRate: sourceJobs.length ? 100 : 0,
         lastRunTime: latest,
@@ -56,13 +63,14 @@ async function readAnalytics() {
           ? Math.round((sourceJobs.reduce((sum, job) => sum + job.gptRelevanceScore, 0) / sourceJobs.length) * 10) / 10
           : 0
       };
-    })
-    .filter((metric) => metric.jobsFound > 0);
+    });
 
   const analytics: DashboardAnalytics = {
     totalJobsFound: jobs.length,
+    totalJobsApplied: jobs.filter((job) => job.status === "APPLIED").length,
     totalActiveJobs: jobs.filter((job) => job.status !== "EXPIRED" && job.status !== "REJECTED").length,
     jobsScrapedToday: jobs.filter((job) => new Date(job.scrapedTime).toDateString() === today).length,
+    jobsAppliedToday: jobs.filter((job) => job.status === "APPLIED" && isSameDay(job.appliedAt, today)).length,
     successRate: jobs.length ? 100 : 0,
     scrapers,
     daily: buildDailyMetrics(jobs),
@@ -126,7 +134,8 @@ function mapRowToAnalyticsJob(row: Record<string, string>): AnalyticsJob {
   return {
     source: normalizeSource(row.source),
     scrapedTime: normalizeDate(row.created_at),
-    status: "UNAPPLIED",
+    appliedAt: normalizeOptionalDate(row.applied_at || row.last_opened_at),
+    status: normalizeStatus(row.status),
     gptRelevanceScore: scoreToTen(Number(row.final_score || row.gpt_score || row.pre_score || 0))
   };
 }
@@ -146,7 +155,7 @@ function buildDailyMetrics(jobs: AnalyticsJob[]) {
   >();
 
   for (const job of jobs) {
-    const date = new Date(job.scrapedTime).toISOString().slice(0, 10);
+    const date = toDateKey(job.scrapedTime);
     const metric =
       days.get(date) ??
       {
@@ -161,11 +170,27 @@ function buildDailyMetrics(jobs: AnalyticsJob[]) {
 
     metric.scraped += 1;
     metric.scoreTotal += job.gptRelevanceScore;
-    if (job.status === "APPLIED") metric.applied += 1;
     if (job.status === "SAVED") metric.saved += 1;
     if (job.status === "INTERVIEW") metric.interviews += 1;
     if (job.status === "REJECTED") metric.rejected += 1;
     days.set(date, metric);
+
+    if (job.status === "APPLIED") {
+      const appliedDate = toDateKey(job.appliedAt ?? job.scrapedTime);
+      const appliedMetric =
+        days.get(appliedDate) ??
+        {
+          date: appliedDate,
+          scraped: 0,
+          applied: 0,
+          saved: 0,
+          interviews: 0,
+          rejected: 0,
+          scoreTotal: 0
+        };
+      appliedMetric.applied += 1;
+      days.set(appliedDate, appliedMetric);
+    }
   }
 
   return [...days.values()]
@@ -186,15 +211,36 @@ function buildStatusBreakdown(jobs: AnalyticsJob[]) {
 
 function normalizeSource(source: string): ScraperSource {
   const normalized = source.toLowerCase();
+  if (normalized.includes("linkedin") && normalized.includes("v2")) return "LinkedIn v2";
   if (normalized.includes("linkedin")) return "LinkedIn";
+  if (normalized.includes("naukri") && normalized.includes("v2")) return "Naukri v2";
   if (normalized.includes("naukri")) return "Naukri";
+  if (normalized.includes("indeed") && normalized.includes("v2")) return "Indeed v2";
   if (normalized.includes("indeed")) return "Indeed";
-  return "Company Site";
+  return source.trim() || "Unknown";
 }
 
 function normalizeDate(value: string) {
   const parsed = Date.parse(value);
   return Number.isNaN(parsed) ? new Date().toISOString() : new Date(parsed).toISOString();
+}
+
+function normalizeOptionalDate(value: string) {
+  const parsed = Date.parse(value);
+  return Number.isNaN(parsed) ? undefined : new Date(parsed).toISOString();
+}
+
+function normalizeStatus(value: string): JobStatus {
+  const normalized = value?.toUpperCase();
+  return statuses.includes(normalized as JobStatus) ? (normalized as JobStatus) : "UNAPPLIED";
+}
+
+function isSameDay(value: string | undefined, today: string) {
+  return value ? new Date(value).toDateString() === today : false;
+}
+
+function toDateKey(value: string) {
+  return new Date(value).toISOString().slice(0, 10);
 }
 
 function scoreToTen(score: number) {

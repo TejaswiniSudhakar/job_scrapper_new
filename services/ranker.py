@@ -56,6 +56,9 @@ def init():
 # EMBEDDINGS
 # ==============================
 def get_embedding(text):
+    if embedding_model is None:
+        init()
+
     return embedding_model.encode(
         text[:5000],
         normalize_embeddings=True
@@ -127,6 +130,11 @@ def salary_score(text):
 # ==============================
 # EXPERIENCE SCORE
 # ==============================
+# Sanity bound for a "years of experience" requirement. Anything outside
+# this range is almost certainly a parsing artifact or a typo from the
+# source posting, not a real requirement.
+MAX_PLAUSIBLE_EXPERIENCE_YEARS = 25
+
 def experience_fit_score(exp_text):
 
     numbers = re.findall(
@@ -137,7 +145,24 @@ def experience_fit_score(exp_text):
     if not numbers:
         return 5
 
-    required_exp = int(numbers[0])
+    numbers = [int(n) for n in numbers]
+
+    # Drop individual numbers that can't plausibly be a years-of-experience
+    # figure (e.g. "812 years", "200 years" from a scraping/typo artifact)
+    # instead of trusting them or throwing out the whole field.
+    plausible = [
+        n for n in numbers
+        if 0 <= n <= MAX_PLAUSIBLE_EXPERIENCE_YEARS
+    ]
+
+    if not plausible:
+        return 5
+
+    # A range like "1 - 8 years" means the candidate qualifies once they
+    # clear the LOWER bound, not the upper one — someone with 1.3 years
+    # fits fine into a "1-8 years" posting. Using min() also naturally
+    # handles a single value ("2 years" -> [2]).
+    required_exp = min(plausible)
 
     gap = required_exp - CANDIDATE_EXPERIENCE_YEARS
 

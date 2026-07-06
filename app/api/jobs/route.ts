@@ -1,13 +1,10 @@
 import { NextResponse } from "next/server";
 import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
-import type { Job, ScraperSource, WorkMode } from "@/types/jobs";
+import type { Job, JobStatus, ScraperSource, WorkMode } from "@/types/jobs";
 
-const backendDir =
-  process.env.JOB_SCRAPER_DATA_DIR ??
-  "C:\\Users\\Nishant Chandraker\\Downloads\\private-job-scraper-main\\private-job-scraper-main";
-
-const jobsCsvPath = path.join(backendDir, "jobs.csv");
+const jobsCsvPath = path.join(process.env.JOB_SCRAPER_DATA_DIR ?? process.cwd(), "jobs.csv");
+const statuses: JobStatus[] = ["UNAPPLIED", "APPLIED", "INTERVIEW", "REJECTED", "OFFER", "EXPIRED", "SAVED"];
 
 type CsvRow = Record<string, string>;
 let jobsCache: { mtimeMs: number; jobs: Job[] } | undefined;
@@ -116,9 +113,10 @@ function mapRowToJob(row: CsvRow): Job {
     gptRelevanceScore: score,
     matchPercentage: Math.round(score * 10),
     applyLink: row.job_url || "#",
-    status: "UNAPPLIED",
+    status: normalizeStatus(row.status),
     notes: "",
     clickCount: 0,
+    appliedAt: normalizeOptionalDate(row.applied_at || row.last_opened_at),
     description,
     companyInfo: row.company ? `${row.company} job scraped from ${source}.` : "Company details not captured.",
     requiredSkills: inferSkills(description),
@@ -189,10 +187,13 @@ function formatExperience(value: string) {
 
 function normalizeSource(source: string): ScraperSource {
   const normalized = source.toLowerCase();
+  if (normalized.includes("linkedin") && normalized.includes("v2")) return "LinkedIn v2";
   if (normalized.includes("linkedin")) return "LinkedIn";
+  if (normalized.includes("naukri") && normalized.includes("v2")) return "Naukri v2";
   if (normalized.includes("naukri")) return "Naukri";
+  if (normalized.includes("indeed") && normalized.includes("v2")) return "Indeed v2";
   if (normalized.includes("indeed")) return "Indeed";
-  return "Company Site";
+  return source.trim() || "Unknown";
 }
 
 function inferWorkMode(text: string): WorkMode {
@@ -284,6 +285,16 @@ function summarizeDescription(description: string) {
 function normalizeDate(value: string) {
   const parsed = Date.parse(value);
   return Number.isNaN(parsed) ? new Date().toISOString() : new Date(parsed).toISOString();
+}
+
+function normalizeOptionalDate(value: string) {
+  const parsed = Date.parse(value);
+  return Number.isNaN(parsed) ? undefined : new Date(parsed).toISOString();
+}
+
+function normalizeStatus(value: string): JobStatus {
+  const normalized = value?.toUpperCase();
+  return statuses.includes(normalized as JobStatus) ? (normalized as JobStatus) : "UNAPPLIED";
 }
 
 function toNumber(value: string) {

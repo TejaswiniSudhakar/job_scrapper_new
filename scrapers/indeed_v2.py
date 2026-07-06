@@ -1,10 +1,9 @@
 import random
-import re
-import subprocess
 import time
+import threading
 
-from services.driver_registry import register_driver, UC_INIT_LOCK
 import undetected_chromedriver as uc
+from services.driver_registry import register_driver, UC_INIT_LOCK
 
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
@@ -13,25 +12,50 @@ from selenium.webdriver.support.ui import WebDriverWait
 from config import APP_CONFIG
 from pipeline.deduplicator import get_job_id, hash_job_url, is_passed, is_seen, mark_passed
 from queue_manager import enqueue_job
-from services.logging_utils import get_logger, log_cycle_summary, log_iteration_summary
+from services.logging_utils import configure_logging, get_logger, log_cycle_summary, log_iteration_summary
 from services.storage import job_exists
 
+# Resolved at runtime to avoid a circular import — main sets this event
+# when it receives SIGINT/SIGTERM so all scraper threads can exit cleanly.
+def _get_shutdown_event():
+    try:
+        import __main__
+        return getattr(__main__, "shutdown_event", None)
+    except Exception:
+        return None
 
-logger = get_logger("scraper.indeed")
+
+logger = get_logger("scraper.indeed_v2")
 SCRAPER_CONFIG = APP_CONFIG["scrapers"]
-INDEED_CONFIG = SCRAPER_CONFIG["indeed"]
-SOURCE_LABEL = "Indeed"
+INDEED_V2_CONFIG = SCRAPER_CONFIG["indeed_v2"]
 
 JOB_KEYWORDS = SCRAPER_CONFIG["keywords"]
-LOCATION = INDEED_CONFIG["location"]
+LOCATION = INDEED_V2_CONFIG["location"]
 
 # How many keywords to run before taking a longer break. Keeps total
 # automated traffic per "burst" lower, which matters more for fingerprint-
 # based bot detection than per-click pacing does.
 KEYWORDS_PER_BATCH = 5
 
+# --- Logged-in session config -----------------------------------------
+# v1 (anonymous) and v2 (logged-in) use separate Chrome user-data-dirs
+# (configured under scrapers.indeed_v2 in config.py), since Chrome locks
+# a user-data-dir to a single running instance regardless of
+# --profile-directory.
+INDEED_V2_PROFILE_DIR = INDEED_V2_CONFIG["chrome_profile_dir"]
+INDEED_V2_PROFILE_NAME = INDEED_V2_CONFIG["chrome_profile_name"]
+
+LOGIN_URL = "https://secure.indeed.com/account/login"
+LOGIN_CHECK_URL = "https://www.indeed.com/myjobs"
+LOGIN_POLL_INTERVAL = 5.0
+LOGIN_TIMEOUT_SECONDS = 600  # how long to wait for manual login before giving up
+
 
 class IndeedVerificationError(Exception):
+    pass
+
+
+class IndeedLoginTimeoutError(Exception):
     pass
 
 
@@ -39,34 +63,14 @@ def random_pause(min_seconds=1.0, max_seconds=3.0):
     time.sleep(random.uniform(min_seconds, max_seconds))
 
 
-def _get_chrome_major_version():
-    """Reads the installed Chrome version from the registry on Windows."""
-    for hive in (
-        r"HKLM\SOFTWARE\Google\Chrome\BLBeacon",
-        r"HKCU\SOFTWARE\Google\Chrome\BLBeacon",
-    ):
-        try:
-            out = subprocess.check_output(
-                f'reg query "{hive}" /v version',
-                shell=True,
-                stderr=subprocess.DEVNULL,
-            ).decode()
-            match = re.search(r"(\d+)\.\d+\.\d+\.\d+", out)
-            if match:
-                return int(match.group(1))
-        except Exception:
-            pass
-    return None  # let UC decide
-
-
 def create_driver():
     options = uc.ChromeOptions()
     options.add_argument("--start-maximized")
-    options.add_argument(f"--user-data-dir={INDEED_CONFIG['chrome_profile_dir']}")
-    options.add_argument(f"--profile-directory={INDEED_CONFIG['chrome_profile_name']}")
+    options.add_argument(f"--user-data-dir={INDEED_V2_PROFILE_DIR}")
+    options.add_argument(f"--profile-directory={INDEED_V2_PROFILE_NAME}")
 
     with UC_INIT_LOCK:
-        driver = uc.Chrome(version_main=_get_chrome_major_version(), options=options)
+        driver = uc.Chrome(version_main=149, options=options)
     register_driver(driver)
     return driver
 
@@ -78,6 +82,80 @@ def is_verification_page(driver):
         return any(marker in page_source for marker in strong_markers)
     except Exception:
         return False
+
+
+# --- Login detection / manual-login flow --------------------------------
+
+def is_logged_in(driver):
+    """
+    Checks whether the current Chrome profile has an active Indeed
+    session by visiting an account-only page and inspecting both the
+    resulting URL and the DOM for sign-in indicators.
+
+    Note: Indeed's markup changes over time. If this starts
+    misreporting login state, open the page in this profile and check
+    what the signed-out state actually looks like, then adjust the
+    markers below.
+    """
+    try:
+        driver.get(LOGIN_CHECK_URL)
+        WebDriverWait(driver, 15).until(
+            lambda d: d.execute_script("return document.readyState") == "complete"
+        )
+        random_pause(2.0, 3.5)
+
+        current_url = driver.current_url.lower()
+        if "secure.indeed.com" in current_url or "/account/login" in current_url:
+            return False
+
+        page_source = driver.page_source.lower()
+        signed_out_markers = [
+            "sign in to view",
+            ">sign in<",
+            "log in to indeed",
+        ]
+        if any(marker in page_source for marker in signed_out_markers):
+            return False
+
+        return True
+    except Exception:
+        logger.exception("Indeed login check failed; assuming not logged in.")
+        return False
+
+
+def wait_for_manual_login(driver):
+    logger.warning("Indeed session not detected. Waiting for manual login.")
+    try:
+        driver.get(LOGIN_URL)
+    except Exception:
+        pass
+
+    print("\n" + "=" * 60)
+    print("INDEED LOGIN REQUIRED")
+    print("A Chrome window is open at the Indeed sign-in page.")
+    print("Please log in manually - this only needs to happen once,")
+    print("since the session persists in this Chrome profile afterwards.")
+    print("The scraper will resume automatically once login is detected.")
+    print("=" * 60 + "\n")
+
+    start_time = time.time()
+    while time.time() - start_time < LOGIN_TIMEOUT_SECONDS:
+        random_pause(LOGIN_POLL_INTERVAL, LOGIN_POLL_INTERVAL + 2)
+        if is_logged_in(driver):
+            logger.info("Indeed login detected. Resuming scraper.")
+            print("Login detected. Resuming scraper...\n")
+            return
+
+    raise IndeedLoginTimeoutError(
+        f"Manual Indeed login was not completed within {LOGIN_TIMEOUT_SECONDS} seconds."
+    )
+
+
+def ensure_logged_in(driver):
+    if is_logged_in(driver):
+        logger.info("Indeed session already active for this Chrome profile.")
+        return
+    wait_for_manual_login(driver)
 
 
 def get_next_page_button(driver, timeout=10):
@@ -276,12 +354,14 @@ def get_company_name(driver):
     return "Unknown"
 
 
-def Indeed(source_label=SOURCE_LABEL):
+def indeed_v2():
     driver = create_driver()
+    ensure_logged_in(driver)
     seen_urls = set()
 
     try:
-        while True:
+        shutdown = _get_shutdown_event()
+        while not (shutdown and shutdown.is_set()):
             total_jobs_found = 0
             fresh_jobs = 0
             cycle_start = time.time()
@@ -296,7 +376,7 @@ def Indeed(source_label=SOURCE_LABEL):
                     url = (
                         f"https://in.indeed.com/jobs?q={keyword.replace(' ', '+')}"
                         f"&l={LOCATION.replace(' ', '+').replace(',', '%2C')}"
-                        f"&fromage={INDEED_CONFIG['days_old']}&radius={INDEED_CONFIG['radius']}"
+                        f"&fromage={INDEED_V2_CONFIG['days_old']}&radius={INDEED_V2_CONFIG['radius']}"
                     )
 
                     driver.get(url)
@@ -381,7 +461,7 @@ def Indeed(source_label=SOURCE_LABEL):
                                         "company_name": company_name,
                                         "location": location,
                                         "job_description": enriched_description,
-                                        "source": source_label,
+                                        "source": "Indeed",
                                     }
 
                                     if job_exists(job_data["job_url"]):
@@ -454,6 +534,15 @@ def Indeed(source_label=SOURCE_LABEL):
                     pass
                 random_pause(5.0, 10.0)
                 driver = create_driver()
+                ensure_logged_in(driver)
+
+            except IndeedLoginTimeoutError:
+                logger.exception("Indeed manual login timed out. Stopping scraper until re-run.")
+                try:
+                    driver.quit()
+                except Exception:
+                    pass
+                raise
 
             except Exception:
                 logger.exception("Indeed fatal cycle error. Recreating driver.")
@@ -463,6 +552,7 @@ def Indeed(source_label=SOURCE_LABEL):
                     pass
                 random_pause(20.0, 60.0)
                 driver = create_driver()
+                ensure_logged_in(driver)
 
             finally:
                 log_cycle_summary(
@@ -474,5 +564,30 @@ def Indeed(source_label=SOURCE_LABEL):
                 )
 
     except KeyboardInterrupt:
-        logger.info("Indeed shutting down.")
-        driver.quit()
+        pass
+    finally:
+        logger.info("Indeed v2 shutting down.")
+        try:
+            driver.quit()
+        except Exception:
+            pass
+
+
+if __name__ == "__main__":
+    # Standalone test run: only this scraper + the bare minimum to keep
+    # it from stalling (db init, and the processor thread to drain the
+    # queue). Does NOT start the CSV exporter, so jobs land in the DB
+    # but jobs.csv won't update during this run - run main.py for that.
+    from threading import Thread
+
+    from pipeline.processor import processor
+    from services.storage import init_db
+
+    configure_logging()
+    init_db()
+
+    processor_thread = Thread(target=processor, daemon=True)
+    processor_thread.start()
+    logger.info("Processor started (standalone Indeed v2 test run).")
+
+    indeed_v2()

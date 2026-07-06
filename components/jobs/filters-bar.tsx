@@ -6,8 +6,8 @@ import { Badge } from "@/components/ui/badge";
 import { useDashboardStore } from "@/store/dashboard-store";
 import type { ScraperSource, WorkMode } from "@/types/jobs";
 
-const sources: ScraperSource[] = ["LinkedIn", "Naukri", "Indeed", "Company Site"];
 const modes: WorkMode[] = ["Remote", "Hybrid", "Onsite"];
+const knownSources: ScraperSource[] = ["LinkedIn", "LinkedIn v2", "Naukri", "Naukri v2", "Indeed", "Indeed v2"];
 const ranges = [
   { label: "24 Hours", value: 1 },
   { label: "3 Days", value: 3 },
@@ -17,7 +17,12 @@ const ranges = [
 
 export function FiltersBar({ onExport, onRefresh, isRefreshing }: { onExport: () => void; onRefresh: () => void; isRefreshing: boolean }) {
   const filters = useDashboardStore((state) => state.filters);
+  const jobs = useDashboardStore((state) => state.jobs);
   const updateFilters = useDashboardStore((state) => state.updateFilters);
+  const sources = [
+    ...knownSources,
+    ...[...new Set(jobs.map((job) => job.source))].filter((source) => !knownSources.includes(source)).sort((a, b) => a.localeCompare(b))
+  ];
 
   function toggleSource(source: ScraperSource) {
     updateFilters({

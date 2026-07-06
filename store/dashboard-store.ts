@@ -10,7 +10,7 @@ type Toast = {
   tone: "success" | "warning" | "danger" | "info";
 };
 
-type PersistedJobState = Partial<Pick<Job, "status" | "notes" | "clickCount" | "lastOpenedAt">> & {
+type PersistedJobState = Partial<Pick<Job, "status" | "notes" | "clickCount" | "lastOpenedAt" | "appliedAt">> & {
   deleted?: boolean;
 };
 
@@ -70,6 +70,7 @@ export const useDashboardStore = create<DashboardState>((set) => ({
                 notes: existing.notes,
                 clickCount: existing.clickCount,
                 lastOpenedAt: existing.lastOpenedAt,
+                appliedAt: existing.appliedAt,
                 isNew: job.isNew || existing.isNew
               }
             : persisted
@@ -95,12 +96,16 @@ export const useDashboardStore = create<DashboardState>((set) => ({
   updateStatus: (jobId, status) =>
     set((state) => {
       const existing = state.jobs.find((job) => job.id === jobId);
-      if (existing) savePersistedJobState(jobId, { ...existing, status });
+      const appliedAt =
+        status === "APPLIED"
+          ? existing?.appliedAt ?? new Date().toISOString()
+          : existing?.appliedAt;
+      if (existing) savePersistedJobState(jobId, { ...existing, status, appliedAt });
 
       return {
-        jobs: state.jobs.map((job) => (job.id === jobId ? { ...job, status } : job)),
+        jobs: state.jobs.map((job) => (job.id === jobId ? { ...job, status, appliedAt } : job)),
         selectedJob:
-          state.selectedJob?.id === jobId ? { ...state.selectedJob, status } : state.selectedJob
+          state.selectedJob?.id === jobId ? { ...state.selectedJob, status, appliedAt } : state.selectedJob
       };
     }),
   selectJob: (job) => set({ selectedJob: job }),
@@ -157,6 +162,7 @@ function savePersistedJobState(jobId: string, job: PersistedJobState) {
       notes: job.notes,
       clickCount: job.clickCount,
       lastOpenedAt: job.lastOpenedAt,
+      appliedAt: job.appliedAt,
       deleted: job.deleted
     };
     window.localStorage.setItem(jobStateStorageKey, JSON.stringify(data));

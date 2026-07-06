@@ -141,6 +141,7 @@ export const mockJobs: Job[] = [
     notes: "Applied through LinkedIn Easy Apply.",
     clickCount: 1,
     lastOpenedAt: iso(60),
+    appliedAt: iso(60),
     description:
       "Build internal automation workflows, data collection tools, API integrations, and quality checks for product operations.",
     companyInfo: "SaaS company building customer engagement and support products.",
@@ -232,13 +233,18 @@ export const mockJobs: Job[] = [
 
 export const mockAnalytics: DashboardAnalytics = {
   totalJobsFound: 507,
+  totalJobsApplied: 15,
   totalActiveJobs: 342,
   jobsScrapedToday: 126,
+  jobsAppliedToday: 5,
   successRate: 91,
   scrapers: [
     {
       source: "LinkedIn",
       jobsFound: 234,
+      jobsFoundToday: 62,
+      jobsApplied: 9,
+      jobsAppliedToday: 3,
       activeJobs: 144,
       successRate: 93,
       lastRunTime: iso(5),
@@ -248,6 +254,9 @@ export const mockAnalytics: DashboardAnalytics = {
     {
       source: "Naukri",
       jobsFound: 178,
+      jobsFoundToday: 41,
+      jobsApplied: 4,
+      jobsAppliedToday: 1,
       activeJobs: 121,
       successRate: 88,
       lastRunTime: iso(18),
@@ -257,6 +266,9 @@ export const mockAnalytics: DashboardAnalytics = {
     {
       source: "Indeed",
       jobsFound: 95,
+      jobsFoundToday: 23,
+      jobsApplied: 2,
+      jobsAppliedToday: 1,
       activeJobs: 77,
       successRate: 84,
       lastRunTime: iso(32),

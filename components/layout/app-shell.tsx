@@ -1,8 +1,7 @@
 "use client";
 
-import { Bell, Columns3, Database, Moon, Search, Sun } from "lucide-react";
+import { Database, LayoutDashboard, Moon, Search, Sun } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { SavedSearches } from "@/components/layout/saved-searches";
 import { useDashboardStore } from "@/store/dashboard-store";
 
 export function AppShell({ children }: { children: React.ReactNode }) {
@@ -23,7 +22,16 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <div className="text-xs text-muted">Scraper command center</div>
           </div>
         </div>
-        <SavedSearches />
+        <nav className="space-y-1">
+          <Button className="w-full justify-start" variant="ghost">
+            <LayoutDashboard className="h-4 w-4" />
+            Dashboard
+          </Button>
+          <Button className="w-full justify-start" variant="ghost" onClick={toggleTheme}>
+            {darkMode ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+            {darkMode ? "Light theme" : "Dark theme"}
+          </Button>
+        </nav>
       </aside>
 
       <main className="min-w-0 flex-1">
@@ -43,12 +51,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                   onChange={(event) => updateFilters({ query: event.target.value })}
                 />
               </label>
-              <Button size="icon" aria-label="Column settings">
-                <Columns3 className="h-4 w-4" />
-              </Button>
-              <Button size="icon" aria-label="Notifications">
-                <Bell className="h-4 w-4" />
-              </Button>
               <Button size="icon" aria-label="Toggle theme" onClick={toggleTheme}>
                 {darkMode ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
               </Button>

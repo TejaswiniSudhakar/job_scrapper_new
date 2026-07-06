@@ -7,7 +7,7 @@ export type JobStatus =
   | "EXPIRED"
   | "SAVED";
 
-export type ScraperSource = "LinkedIn" | "Naukri" | "Indeed" | "Company Site" | "Referral";
+export type ScraperSource = string;
 
 export type ScraperStatus = "Running" | "Failed" | "Completed" | "Idle";
 
@@ -34,6 +34,7 @@ export type Job = {
   notes: string;
   clickCount: number;
   lastOpenedAt?: string;
+  appliedAt?: string;
   duplicateScore?: number;
   duplicateOf?: string;
   description: string;
@@ -54,6 +55,9 @@ export type Job = {
 export type ScraperMetric = {
   source: ScraperSource;
   jobsFound: number;
+  jobsFoundToday: number;
+  jobsApplied: number;
+  jobsAppliedToday: number;
   activeJobs: number;
   successRate: number;
   lastRunTime: string;
@@ -63,8 +67,10 @@ export type ScraperMetric = {
 
 export type DashboardAnalytics = {
   totalJobsFound: number;
+  totalJobsApplied: number;
   totalActiveJobs: number;
   jobsScrapedToday: number;
+  jobsAppliedToday: number;
   successRate: number;
   scrapers: ScraperMetric[];
   daily: DailyJobMetric[];

@@ -103,6 +103,32 @@ APP_CONFIG = {
             "use_logged_in_profile": True,
             "chrome_profile_dir": str(Path.home() / "my_scraper" / "selenium_profile"),
         },
+        # --- v2 scrapers: logged-in versions with updated selectors.
+        # Separate chrome_profile_dir so they can run alongside the v1
+        # scrapers without fighting over the same Chrome user-data-dir. ---
+        "linkedin_v2": {
+            "locations": ["Bangalore"],
+            "date_posted": "24h",
+            # Experience levels: 1 = Internship, 2 = Entry Level, 3 = Associate
+            "experience_levels": "1,2,3",
+            "use_logged_in_profile": True,
+            "chrome_profile_dir": str(Path.home() / "my_scraper" / "selenium_profile_linkedin_v2"),
+        },
+        "naukri_v2": {
+            "location": "bengaluru",
+            "experience": "2",
+            "job_age": 1,
+            "use_logged_in_profile": True,
+            "chrome_profile_dir": str(Path.home() / "my_scraper" / "selenium_profile_naukri_v2"),
+        },
+        "indeed_v2": {
+            "location": "Bengaluru, Karnataka",
+            "radius": 35,
+            "days_old": 1,
+            "use_logged_in_profile": True,
+            "chrome_profile_dir": str(Path.home() / "my_scraper" / "selenium_profile_indeed_v2"),
+            "chrome_profile_name": "Default",
+        },
     },
     "queue": {
         "max_size": 500,

@@ -1,11 +1,11 @@
-import { Activity, BriefcaseBusiness, CheckCircle2, Sparkles } from "lucide-react";
+import { BriefcaseBusiness, CalendarCheck2, Send, Sparkles } from "lucide-react";
 import type { DashboardAnalytics } from "@/types/jobs";
 
 const items = [
   { key: "totalJobsFound", label: "Total jobs found", icon: BriefcaseBusiness },
-  { key: "totalActiveJobs", label: "Active jobs", icon: Activity },
-  { key: "jobsScrapedToday", label: "Scraped today", icon: Sparkles },
-  { key: "successRate", label: "Success rate", icon: CheckCircle2, suffix: "%" }
+  { key: "totalJobsApplied", label: "Total jobs applied", icon: Send },
+  { key: "jobsScrapedToday", label: "Jobs found today", icon: Sparkles },
+  { key: "jobsAppliedToday", label: "Applied today", icon: CalendarCheck2 }
 ] as const;
 
 export function KpiStrip({ analytics }: { analytics: DashboardAnalytics }) {
@@ -21,7 +21,6 @@ export function KpiStrip({ analytics }: { analytics: DashboardAnalytics }) {
             </div>
             <div className="mt-3 text-2xl font-semibold tracking-normal">
               {analytics[item.key].toLocaleString("en-IN")}
-              {"suffix" in item ? item.suffix : ""}
             </div>
           </div>
         );

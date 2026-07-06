@@ -14,6 +14,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 from config import APP_CONFIG
 from pipeline.deduplicator import hash_job_url, is_passed, mark_passed
 from queue_manager import enqueue_job
+from services.driver_registry import register_driver
 from services.logging_utils import get_logger, log_cycle_summary, log_iteration_summary
 from services.storage import job_exists
 
@@ -21,6 +22,7 @@ from services.storage import job_exists
 logger = get_logger("scraper.linkedin")
 SCRAPER_CONFIG = APP_CONFIG["scrapers"]
 LINKEDIN_CONFIG = SCRAPER_CONFIG["linkedin"]
+SOURCE_LABEL = "LinkedIn"
 
 JOB_KEYWORDS = SCRAPER_CONFIG["keywords"]
 COUNTRIES = LINKEDIN_CONFIG["locations"]
@@ -185,6 +187,7 @@ def linkedIn():
     options.add_argument("--incognito")
 
     driver = webdriver.Chrome(options=options)
+    register_driver(driver)
 
     try:
         seen_urls = set()
@@ -267,7 +270,7 @@ def linkedIn():
                                     "company_name": company_name,
                                     "location": location,
                                     "job_description": job_description,
-                                    "source": "linkedin",
+                                    "source": SOURCE_LABEL,
                                 }
 
                                 try:
