@@ -9,8 +9,8 @@ More bullets = better ATS matching for diverse job descriptions.
 
 RESUME_DATA = {
     "name": "Nishant Chandraker",
-    "email": "nishant.chandraker@example.com",
-    "phone": "+91-XXXXXXXXXX",
+    "email": "nishant31.chandraker@example.com",
+    "phone": "+91-9757064016",
     "location": "Bengaluru, India",
     "linkedin": "https://www.linkedin.com/in/nishant-chandraker-93750b206/",
     "github": "https://github.com/nishant73",
@@ -41,7 +41,7 @@ RESUME_DATA = {
 
     "experience": [
         {
-            "title": "System Engineer (Finance)",
+            "title": "System Engineer",
             "company": "Tata Consultancy Services",
             "location": "Bengaluru, India",
             "start": "Aug 2024",
@@ -182,17 +182,17 @@ RESUME_DATA = {
                 "Containerized services with Docker Compose for local development and Kubernetes for production",
                 "Implemented monitoring with Prometheus metrics and Grafana dashboards for throughput and lag tracking",
             ],
-            "tags": ["java", "spring boot", "kafka", "redis", "docker", "distributed systems", "microservices", "kubernetes"],
+            "tags": ["java", "spring boot", "kafka", "redis", "docker", "distributed systems", "microservices"],
         },
     ],
 
     "education": [
         {
             "degree": "B.Tech in Computer Science",
-            "institution": "Your University",
-            "location": "Your City, India",
-            "year": "2023",
-            "gpa": "8.5/10",
+            "institution": "Vellore Institute of Technology (VIT), Vellore",
+            "location": "Vellore, TN, India",
+            "year": "2020 - 2024",
+            "gpa": "7.44/10",
         },
     ],
 
