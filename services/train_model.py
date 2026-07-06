@@ -1,16 +1,21 @@
 """
-Train the job ranking model on the same numeric features that ranker.py
-produces at inference time:
+Train a 3-class job fit classifier:
+    GOOD_FIT (2) / MAYBE (1) / BAD_FIT (0)
 
-    [emb_score, skill_score, exp_score, salary_log]
+Features (expanded from 4 to 10):
+    emb_score, skill_score, exp_score, salary_log,
+    title_similarity, keyword_overlap, skill_match_ratio,
+    location_match, has_salary, description_length
 
-Target: gpt_score (from the jobs.csv exported by the scraper pipeline).
+Labels derived from gpt_score:
+    >= 7.5 -> GOOD_FIT (2)
+    >= 5.0 -> MAYBE (1)
+    < 5.0  -> BAD_FIT (0)
 
 Usage:
     python services/train_model.py
 
-The trained model is saved to services/job_rank_model.pkl and loaded by
-ranker.py at startup.
+Saves to services/job_classifier_model.pkl
 """
 
 import sys
@@ -19,146 +24,121 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import joblib
-from sklearn.ensemble import GradientBoostingRegressor
+from sklearn.ensemble import GradientBoostingClassifier
 from sklearn.model_selection import cross_val_score, train_test_split
-from sklearn.metrics import mean_absolute_error, r2_score
+from sklearn.metrics import classification_report, confusion_matrix
 
-# Ensure project root is on the path so we can import config/services
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from config import APP_CONFIG
-from services.ranker import (
-    init,
-    extract_features,
-)
+from services.ranker import init as init_ranker
+from services.feature_extractor import extract_classification_features
 
-# ======================================
-# CONFIG
-# ======================================
 CSV_PATH = str(APP_CONFIG["files"]["jobs_csv"])
-MODEL_OUTPUT_PATH = str(Path(__file__).resolve().parent / "job_rank_model.pkl")
+MODEL_OUTPUT_PATH = str(Path(__file__).resolve().parent / "job_classifier_model.pkl")
+
+# Label thresholds
+GOOD_THRESHOLD = 7.5
+MAYBE_THRESHOLD = 5.0
 
 
-# ======================================
-# LOAD DATA
-# ======================================
+def score_to_label(score):
+    if score >= GOOD_THRESHOLD:
+        return 2  # GOOD_FIT
+    elif score >= MAYBE_THRESHOLD:
+        return 1  # MAYBE
+    return 0  # BAD_FIT
+
+
 def load_training_data():
     df = pd.read_csv(CSV_PATH)
-
-    # Need gpt_score as the training target
     df = df[df["gpt_score"].notna()].copy()
     df["gpt_score"] = df["gpt_score"].astype(float)
-
-    # Filter out rows where gpt_score is clearly invalid
     df = df[(df["gpt_score"] >= 0) & (df["gpt_score"] <= 10)]
+    df["label"] = df["gpt_score"].apply(score_to_label)
 
-    print(f"Loaded {len(df)} jobs with valid gpt_score from {CSV_PATH}")
+    print(f"Loaded {len(df)} jobs")
+    print(f"  GOOD_FIT (>=7.5): {(df['label'] == 2).sum()}")
+    print(f"  MAYBE (5-7.5):    {(df['label'] == 1).sum()}")
+    print(f"  BAD_FIT (<5):     {(df['label'] == 0).sum()}")
     return df
 
 
-# ======================================
-# EXTRACT FEATURES (same as ranker.py)
-# ======================================
 def build_feature_matrix(df):
-    """Build the same [emb_score, skill_score, exp_score, salary_log] features
-    that ranker.extract_features() produces at inference time."""
     features = []
-    skipped = 0
+    valid_indices = []
 
-    for _, row in df.iterrows():
+    for idx, row in df.iterrows():
         job = {
             "job_title": row.get("title", ""),
             "company_name": row.get("company", ""),
             "job_description": row.get("job_description", ""),
             "experience_required": row.get("experience_required", ""),
             "salary": row.get("salary", ""),
+            "location": row.get("location", ""),
+            "created_at": row.get("created_at", ""),
         }
-
         try:
-            feat = extract_features(job)
+            feat = extract_classification_features(job)
             features.append(feat)
-        except Exception as e:
-            skipped += 1
+            valid_indices.append(idx)
+        except Exception:
             continue
 
-    if skipped:
-        print(f"Skipped {skipped} rows due to feature extraction errors")
-
-    return np.array(features)
+    return np.array(features), valid_indices
 
 
-# ======================================
-# TRAIN
-# ======================================
 def train():
-    # Initialize the embedding model used by extract_features
-    init()
+    init_ranker()
 
     df = load_training_data()
-    if len(df) < 20:
-        print("Not enough training data (need at least 20 rows). Exiting.")
+    if len(df) < 30:
+        print("Not enough data (need 30+). Exiting.")
         return
 
-    print("Extracting features (this may take a while)...")
-    X = build_feature_matrix(df)
+    print("Extracting features...")
+    X, valid_indices = build_feature_matrix(df)
+    y = df.loc[valid_indices, "label"].values
 
-    # X may have fewer rows than df if some were skipped
-    y = df["gpt_score"].values[: len(X)]
+    print(f"Feature matrix: {X.shape}")
 
-    if len(X) != len(y):
-        # Align: only keep rows where features were successfully extracted
-        y = y[: len(X)]
-
-    print(f"Feature matrix shape: {X.shape}")
-    print(f"Feature columns: [emb_score, skill_score, exp_score, salary_log]")
-
-    # Split
     X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.2, random_state=42
+        X, y, test_size=0.2, random_state=42, stratify=y
     )
 
-    # Model: GradientBoosting works well for small numeric feature sets
-    model = GradientBoostingRegressor(
-        n_estimators=200,
-        max_depth=5,
+    model = GradientBoostingClassifier(
+        n_estimators=300,
+        max_depth=4,
         learning_rate=0.1,
         subsample=0.8,
+        min_samples_leaf=5,
         random_state=42,
     )
 
-    # Cross-validation on training set
-    cv_scores = cross_val_score(
-        model, X_train, y_train, cv=5, scoring="neg_mean_absolute_error"
-    )
-    print(f"\nCross-validation MAE: {-cv_scores.mean():.3f} (+/- {cv_scores.std():.3f})")
+    cv_scores = cross_val_score(model, X_train, y_train, cv=5, scoring="accuracy")
+    print(f"\nCV Accuracy: {cv_scores.mean():.3f} (+/- {cv_scores.std():.3f})")
 
-    # Final fit
     model.fit(X_train, y_train)
-
-    # Evaluate on held-out test set
     preds = model.predict(X_test)
-    preds = np.clip(preds, 0, 10)
-
-    mae = mean_absolute_error(y_test, preds)
-    r2 = r2_score(y_test, preds)
-    within_one = (np.abs(preds - y_test) <= 1).mean()
-    within_half = (np.abs(preds - y_test) <= 0.5).mean()
 
     print("\n===== TEST SET RESULTS =====")
-    print(f"MAE:          {mae:.3f}")
-    print(f"R2:           {r2:.3f}")
-    print(f"Within ±0.5:  {within_half * 100:.1f}%")
-    print(f"Within ±1.0:  {within_one * 100:.1f}%")
+    label_names = ["BAD_FIT", "MAYBE", "GOOD_FIT"]
+    print(classification_report(y_test, preds, target_names=label_names))
+    print("Confusion Matrix:")
+    print(confusion_matrix(y_test, preds))
 
     # Feature importances
-    feature_names = ["emb_score", "skill_score", "exp_score", "salary_log"]
+    feature_names = [
+        "exp_score", "skill_score", "exp_skill_combo", "emb_score",
+        "title_similarity", "keyword_overlap", "skill_match_ratio",
+        "salary_log", "location_match", "desc_length_log",
+    ]
     importances = model.feature_importances_
     print("\n===== FEATURE IMPORTANCES =====")
     for name, imp in sorted(zip(feature_names, importances), key=lambda x: -x[1]):
-        print(f"  {name:15s} {imp:.3f}")
+        print(f"  {name:20s} {imp:.3f}")
 
-    # Save
     joblib.dump(model, MODEL_OUTPUT_PATH)
     print(f"\nModel saved to {MODEL_OUTPUT_PATH}")
 

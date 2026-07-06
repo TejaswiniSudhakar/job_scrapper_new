@@ -30,9 +30,13 @@ WEIGHT_EMBEDDING = 0.20
 # ==============================
 embedding_model = None
 ranking_model = None
+classifier_model = None
 
 # Each resume profile: {"name": str, "text": str, "embedding": ndarray, "skills": set}
 resume_profiles = []
+
+# Classifier label mapping
+FIT_LABELS = {0: "BAD_FIT", 1: "MAYBE", 2: "GOOD_FIT"}
 
 
 # ==============================
@@ -117,6 +121,7 @@ def _derive_resume_name(pdf_path):
 def init():
     global embedding_model
     global ranking_model
+    global classifier_model
     global resume_profiles
 
     print("Loading embedding model...")
@@ -161,14 +166,21 @@ def init():
             "skills": fallback_skills,
         })
 
-    # Load trained model if available
+    # Load trained models if available
     try:
         model_path = Path(__file__).resolve().parent / "job_rank_model.pkl"
         ranking_model = joblib.load(model_path)
-        print("Loaded trained ranking model")
+        print("Loaded trained ranking model (regression)")
     except Exception:
         ranking_model = None
-        print("No trained model found, using formula-based scoring")
+
+    try:
+        clf_path = Path(__file__).resolve().parent / "job_classifier_model.pkl"
+        classifier_model = joblib.load(clf_path)
+        print("Loaded trained classifier model (3-class)")
+    except Exception:
+        classifier_model = None
+        print("No classifier found, using formula-based scoring only")
 
 
 # ==============================
@@ -363,8 +375,29 @@ def rank_job(job):
         exp_score * WEIGHT_EXPERIENCE
     )
 
-    # Use trained model if available
-    if ranking_model:
+    # Use classifier if available, otherwise fall back to formula
+    fit_label = "UNKNOWN"
+    final_score = pre_score
+
+    if classifier_model:
+        try:
+            from services.feature_extractor import extract_classification_features
+            features = extract_classification_features(job)
+            pred_class = classifier_model.predict([features])[0]
+            proba = classifier_model.predict_proba([features])[0]
+            fit_label = FIT_LABELS.get(pred_class, "UNKNOWN")
+            confidence = float(proba[pred_class])
+
+            # Only override formula score when classifier is confident
+            if confidence >= 0.6:
+                if pred_class == 2:  # GOOD_FIT
+                    final_score = max(pre_score, 7.5 + confidence)
+                elif pred_class == 0:  # BAD_FIT
+                    final_score = min(pre_score, 5.5 - confidence)
+            # Low confidence or MAYBE -> keep pre_score
+        except Exception:
+            final_score = pre_score
+    elif ranking_model:
         try:
             salary_text = " ".join([
                 str(job.get("salary", "")),
@@ -373,16 +406,12 @@ def rank_job(job):
             ])
             salary_log = np.log1p(extract_salary(salary_text) or 0)
             features = [emb_score, skill_score, exp_score, salary_log]
-
-            predicted_score = ranking_model.predict([features])[0]
-            predicted_score = max(0, min(10, predicted_score))
+            final_score = float(np.clip(ranking_model.predict([features])[0], 0, 10))
         except Exception:
-            predicted_score = pre_score
-    else:
-        predicted_score = pre_score
+            final_score = pre_score
 
     reason = (
-        f"BestResume={best_resume_name}, "
+        f"Fit={fit_label}, BestResume={best_resume_name}, "
         f"Experience={exp_score:.1f}, "
         f"Skills={skill_score:.1f}, "
         f"Similarity={emb_score:.1f}"
@@ -390,7 +419,7 @@ def rank_job(job):
 
     return (
         round(pre_score, 2),
-        round(predicted_score, 2),
-        round(predicted_score, 2),
+        round(final_score, 2),
+        round(final_score, 2),
         reason,
     )
