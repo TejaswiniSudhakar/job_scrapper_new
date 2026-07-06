@@ -38,9 +38,9 @@ from services.feature_extractor import extract_classification_features
 CSV_PATH = str(APP_CONFIG["files"]["jobs_csv"])
 MODEL_OUTPUT_PATH = str(Path(__file__).resolve().parent / "job_classifier_model.pkl")
 
-# Label thresholds
-GOOD_THRESHOLD = 7.5
-MAYBE_THRESHOLD = 5.0
+# Label thresholds — adjusted to ensure all 3 classes have samples
+GOOD_THRESHOLD = 7.0
+MAYBE_THRESHOLD = 5.5
 
 
 def score_to_label(score):
@@ -59,9 +59,19 @@ def load_training_data():
     df["label"] = df["gpt_score"].apply(score_to_label)
 
     print(f"Loaded {len(df)} jobs")
-    print(f"  GOOD_FIT (>=7.5): {(df['label'] == 2).sum()}")
-    print(f"  MAYBE (5-7.5):    {(df['label'] == 1).sum()}")
-    print(f"  BAD_FIT (<5):     {(df['label'] == 0).sum()}")
+    print(f"  GOOD_FIT (>={GOOD_THRESHOLD}): {(df['label'] == 2).sum()}")
+    print(f"  MAYBE ({MAYBE_THRESHOLD}-{GOOD_THRESHOLD}):    {(df['label'] == 1).sum()}")
+    print(f"  BAD_FIT (<{MAYBE_THRESHOLD}):     {(df['label'] == 0).sum()}")
+
+    # Drop classes with too few samples
+    class_counts = df['label'].value_counts()
+    valid_classes = class_counts[class_counts >= 3].index
+    df = df[df['label'].isin(valid_classes)].copy()
+
+    if len(df['label'].unique()) < 2:
+        print("ERROR: Need at least 2 classes with 3+ samples each.")
+        sys.exit(1)
+
     return df
 
 
@@ -123,8 +133,10 @@ def train():
     preds = model.predict(X_test)
 
     print("\n===== TEST SET RESULTS =====")
-    label_names = ["BAD_FIT", "MAYBE", "GOOD_FIT"]
-    print(classification_report(y_test, preds, target_names=label_names))
+    all_label_names = ["BAD_FIT", "MAYBE", "GOOD_FIT"]
+    present_classes = sorted(np.unique(np.concatenate([y_test, preds])))
+    label_names = [all_label_names[c] for c in present_classes]
+    print(classification_report(y_test, preds, target_names=label_names, labels=present_classes))
     print("Confusion Matrix:")
     print(confusion_matrix(y_test, preds))
 
