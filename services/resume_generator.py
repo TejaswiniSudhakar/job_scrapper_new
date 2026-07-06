@@ -299,7 +299,7 @@ def _generate_latex(job, profile_name, jd_keywords):
     for exp in data["experience"]:
         # Primary role gets more bullets, internship gets fewer
         is_primary = exp.get("end", "") == "Present" or exp == data["experience"][0]
-        max_b = 7 if is_primary else 5
+        max_b = 10 if is_primary else 7
         bullets = _select_ats_bullets(exp["bullets"], exp.get("tags", []), jd_keywords, max_bullets=max_b)
         experience_sections.append({**exp, "bullets": bullets})
 
@@ -330,7 +330,8 @@ def _generate_latex(job, profile_name, jd_keywords):
     {\LARGE \textbf{""" + _escape_latex(data["name"]) + r"""}}\\[4pt]
     """ + _escape_latex(data["phone"]) + r""" \;|\;
     \href{mailto:""" + data["email"] + r"""}{""" + _escape_latex(data["email"]) + r"""} \;|\;
-    LinkedIn \;|\; GitHub \;|\; LeetCode
+    \href{""" + data["linkedin"] + r"""}{LinkedIn} \;|\;
+    \href{""" + data["github"] + r"""}{GitHub}
 \end{center}
 
 %------------------------------------------------
@@ -379,7 +380,7 @@ def _generate_latex(job, profile_name, jd_keywords):
 """
 
     for i, proj in enumerate(projects):
-        bullets = _select_ats_bullets(proj["bullets"], proj.get("tags", []), jd_keywords, max_bullets=6)
+        bullets = _select_ats_bullets(proj["bullets"], proj.get("tags", []), jd_keywords, max_bullets=8)
         latex += r"\textbf{" + _escape_latex(proj["name"]) + r"}\\" + "\n"
         latex += r"\textit{" + _escape_latex(proj["tech"]) + r"}" + "\n\n"
         latex += r"\begin{itemize}" + "\n"

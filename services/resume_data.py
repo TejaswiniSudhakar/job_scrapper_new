@@ -12,8 +12,8 @@ RESUME_DATA = {
     "email": "nishant.chandraker@example.com",
     "phone": "+91-XXXXXXXXXX",
     "location": "Bengaluru, India",
-    "linkedin": "linkedin.com/in/nishant-chandraker",
-    "github": "github.com/nishant73",
+    "linkedin": "https://www.linkedin.com/in/nishant-chandraker-93750b206/",
+    "github": "https://github.com/nishant73",
 
     "summary_templates": {
         "Backend": (

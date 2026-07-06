@@ -3,7 +3,7 @@
 import "ag-grid-community/styles/ag-grid.css";
 import "ag-grid-community/styles/ag-theme-quartz.css";
 
-import { useMemo, useRef } from "react";
+import { useCallback, useMemo, useRef } from "react";
 import { AllCommunityModule, ModuleRegistry, type ColDef, type GridApi, type GridReadyEvent, type RowClickedEvent, type PostSortRowsParams } from "ag-grid-community";
 import { AgGridReact } from "ag-grid-react";
 import { ExternalLink } from "lucide-react";
@@ -19,10 +19,18 @@ ModuleRegistry.registerModules([AllCommunityModule]);
 
 export function JobGrid({ jobs }: { jobs: Job[] }) {
   const gridRef = useRef<GridApi<Job> | null>(null);
+  const jobOrderRef = useRef<Map<string, number>>(new Map());
   const selectJob = useDashboardStore((state) => state.selectJob);
   const updateStatus = useDashboardStore((state) => state.updateStatus);
   const pushToast = useDashboardStore((state) => state.pushToast);
   const darkMode = useDashboardStore((state) => state.darkMode);
+
+  // Keep a ref of the intended row order from the parent
+  useMemo(() => {
+    const map = new Map<string, number>();
+    jobs.forEach((job, i) => map.set(job.id, i));
+    jobOrderRef.current = map;
+  }, [jobs]);
 
   const columnDefs = useMemo<ColDef<Job>[]>(
     () => [
@@ -71,7 +79,6 @@ export function JobGrid({ jobs }: { jobs: Job[] }) {
         headerName: "Scraped",
         field: "scrapedTime",
         minWidth: 110,
-        sort: "desc",
         valueFormatter: ({ value }) => formatRelativeTime(value)
       },
       { headerName: "Location", field: "location", minWidth: 180 },
@@ -142,12 +149,14 @@ export function JobGrid({ jobs }: { jobs: Job[] }) {
     if (event.data) selectJob(event.data);
   }
 
-  function keepAppliedJobsAtBottom(params: PostSortRowsParams<Job>) {
-    const activeRows = params.nodes.filter((node) => node.data?.status !== "APPLIED");
-    const appliedRows = params.nodes.filter((node) => node.data?.status === "APPLIED");
-    params.nodes.length = 0;
-    params.nodes.push(...activeRows, ...appliedRows);
-  }
+  const enforceExternalOrder = useCallback((params: PostSortRowsParams<Job>) => {
+    const orderMap = jobOrderRef.current;
+    params.nodes.sort((a, b) => {
+      const idxA = orderMap.get(a.data?.id ?? "") ?? Number.MAX_SAFE_INTEGER;
+      const idxB = orderMap.get(b.data?.id ?? "") ?? Number.MAX_SAFE_INTEGER;
+      return idxA - idxB;
+    });
+  }, []);
 
   function getRowClasses(data?: Job) {
     return [data?.status === "APPLIED" ? "applied-job-row" : "", data?.isNew ? "new-job-row" : ""]
@@ -162,7 +171,7 @@ export function JobGrid({ jobs }: { jobs: Job[] }) {
         columnDefs={columnDefs}
         theme="legacy"
         defaultColDef={{
-          sortable: true,
+          sortable: false,
           filter: true,
           resizable: true,
           floatingFilter: true
@@ -171,11 +180,11 @@ export function JobGrid({ jobs }: { jobs: Job[] }) {
         animateRows
         suppressScrollOnNewData
         getRowId={({ data }) => data.id}
-        postSortRows={keepAppliedJobsAtBottom}
         pagination
         paginationPageSize={50}
         rowBuffer={20}
         suppressCellFocus
+        postSortRows={enforceExternalOrder}
         onGridReady={onGridReady}
         onRowClicked={onRowClicked}
         getRowClass={({ data }) => getRowClasses(data)}

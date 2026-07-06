@@ -180,8 +180,8 @@ function buildDailyMetrics(jobs: Job[]) {
     if (job.status === "REJECTED") metric.rejected += 1;
     days.set(date, metric);
 
-    if (job.status === "APPLIED") {
-      const appliedDate = toDateKey(job.appliedAt ?? job.scrapedTime);
+    if (job.status === "APPLIED" && job.appliedAt) {
+      const appliedDate = toDateKey(job.appliedAt);
       const appliedMetric =
         days.get(appliedDate) ??
         {
